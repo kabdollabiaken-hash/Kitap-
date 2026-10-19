@@ -1,0 +1,2 @@
+export const SUPABASE_URL = 'https://zefascvoxzlvyfhvtxiv.supabase.co';
+export const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InplZmFzY3ZveHpsdnlmaHZ0eGl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0MTAwOTcsImV4cCI6MjEwNzk4NjA5N30.roXr1fSP4WOLxwwWI04aDvEJ8g4Avwkfnf98_uUaDl0';
