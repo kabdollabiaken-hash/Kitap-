@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="kk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Көп жазулы тест / 多文字测试</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Naskh+Arabic:wght@400;700&family=Noto+Sans+Arabic:wght@400;700&family=Noto+Sans:wght@400;600&family=Noto+Serif+SC:wght@400;700&family=Noto+Serif:wght@400;700&family=Scheherazade+New:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root { --f-arab: 'Scheherazade New'; --f-other: 'Noto Serif'; --size: 20px; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f4f5f7; color: #1c2024; font-family: 'Noto Sans', sans-serif; }
+header, main { max-width: 900px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 22px; margin: 0 0 12px; }
+.bar { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+.bar label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+select, textarea, input { font: inherit; }
+select { min-height: 40px; }
+.status { margin-top: 12px; font-size: 14px; font-weight: 600; }
+.ok { color: #0a6b3d; }
+.bad { color: #b00020; }
+.card { background: #fff; border: 1px solid #dde1e5; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+.card h2 { margin: 0 0 4px; font-size: 20px; }
+.card h3 { margin: 16px 0 6px; font-size: 16px; }
+.meta { font-size: 12px; color: #4a525a; margin: 6px 0; }
+.content { font-size: var(--size); line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: #fafbfc; border-radius: 8px; }
+[lang="kk-Arab"] { font-family: var(--f-arab), serif; line-height: 2.3; }
+[lang="kk-Cyrl"], [lang="kk-Latn"], [lang="ru"], [lang="en"] { font-family: var(--f-other), serif; }
+[lang="zh"] { font-family: 'Noto Serif SC', serif; }
+.row { font-size: 13px; margin-top: 8px; word-break: break-all; }
+textarea { width: 100%; min-height: 120px; padding: 10px; border: 1px solid #c9ced4; border-radius: 8px; }
+#preview { font-size: var(--size); line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 12px; padding: 12px; background: #fafbfc; border-radius: 8px; min-height: 48px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 data-i18n="title"></h1>
+  <div class="bar">
+    <label><span data-i18n="uiLang"></span>
+      <select id="uiLang">
+        <option value="kk">Қазақша</option>
+        <option value="ru">Русский</option>
+        <option value="zh">中文</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+    <label><span data-i18n="fontArab"></span>
+      <select id="fontArab">
+        <option>Scheherazade New</option>
+        <option>Noto Naskh Arabic</option>
+        <option>Amiri</option>
+        <option>Noto Sans Arabic</option>
+      </select>
+    </label>
+    <label><span data-i18n="fontOther"></span>
+      <select id="fontOther">
+        <option>Noto Serif</option>
+        <option>Noto Sans</option>
+      </select>
+    </label>
+    <label><span data-i18n="size"></span>
+      <input id="size" type="range" min="14" max="32" value="20">
+      <output id="sizeOut">20</output>
+    </label>
+  </div>
+  <div id="snap" class="status"></div>
+</header>
+
+<main>
+  <div id="state" class="status"></div>
+  <section id="books"></section>
+
+  <section class="card">
+    <h2 data-i18n="pasteTitle"></h2>
+    <p class="meta" data-i18n="pasteHint"></p>
+    <textarea id="paste"></textarea>
+    <div class="bar" style="margin-top:8px">
+      <label><span data-i18n="dir"></span>
+        <select id="pdir"><option>auto</option><option>ltr</option><option>rtl</option></select>
+      </label>
+      <label>lang
+        <select id="plang">
+          <option>kk-Arab</option><option>kk-Latn</option><option>kk-Cyrl</option>
+          <option>ru</option><option>zh</option><option>en</option>
+        </select>
+      </label>
+      <label><span data-i18n="cmp"></span>
+        <select id="cmp"></select>
+      </label>
+    </div>
+    <div id="preview"></div>
+    <div id="pasteHash" class="row"></div>
+    <div id="pasteResult" class="status"></div>
+  </section>
+</main>
+
+<script type="module">
+import { SUPABASE_URL, SUPABASE_KEY } from './js/config.js';
+
+const I18N = {
+  kk: { title: 'Көп жазулы тест беті', uiLang: 'Интерфейс тілі', fontArab: 'Қаріп (араб жазуы)', fontOther: 'Қаріп (басқа жазулар)', size: 'Өлшемі', loading: 'Жүктелуде…', loadFail: 'Жүктеу қатесі', noData: 'Тест деректері жоқ', hashOk: 'Хэш сәйкес', hashBad: 'Хэш сәйкес емес', chars: 'таңба', pasteTitle: 'Өз мәтініңізді тексеру', pasteHint: 'Түпнұсқа мәтінді осы жерге қойыңыз', dir: 'Бағыты', cmp: 'Салыстырылатын тарау', snapSame: 'Интерфейс тілін ауыстырғанда кітап мәтіні өзгерген жоқ', snapBad: 'Назар аударыңыз: кітап мәтіні өзгерді', noCfg: 'js/config.js файлына Supabase мәндерін жазыңыз', pickCh: 'Тарауды таңдаңыз' },
+  ru: { title: 'Тестовая страница многописьменности', uiLang: 'Язык интерфейса', fontArab: 'Шрифт (арабское письмо)', fontOther: 'Шрифт (остальные письменности)', size: 'Размер', loading: 'Загрузка…', loadFail: 'Ошибка загрузки', noData: 'Нет тестовых данных', hashOk: 'Хэш совпадает', hashBad: 'Хэш не совпадает', chars: 'символов', pasteTitle: 'Проверка вашего текста', pasteHint: 'Вставьте сюда исходный текст', dir: 'Направление', cmp: 'Глава для сравнения', snapSame: 'При смене языка интерфейса текст книг не изменился', snapBad: 'Внимание: текст книг изменился', noCfg: 'Впишите значения Supabase в js/config.js', pickCh: 'Выберите главу' },
+  zh: { title: '多文字测试页', uiLang: '界面语言', fontArab: '字体（阿拉伯文）', fontOther: '字体（其他文字）', size: '字号', loading: '加载中…', loadFail: '加载失败', noData: '没有测试数据', hashOk: '哈希一致', hashBad: '哈希不一致', chars: '个字符', pasteTitle: '检查你自己的文本', pasteHint: '把原文粘贴到这里', dir: '方向', cmp: '对比章节', snapSame: '切换界面语言后，书籍原文没有变化', snapBad: '注意：书籍原文发生了变化', noCfg: '请在 js/config.js 里填入 Supabase 的值', pickCh: '请选择章节' },
+  en: { title: 'Multi-script test page', uiLang: 'Interface language', fontArab: 'Font (Arabic script)', fontOther: 'Font (other scripts)', size: 'Size', loading: 'Loading…', loadFail: 'Load failed', noData: 'No test data', hashOk: 'Hash matches', hashBad: 'Hash does not match', chars: 'characters', pasteTitle: 'Check your own text', pasteHint: 'Paste the original text here', dir: 'Direction', cmp: 'Chapter to compare', snapSame: 'Book text did not change after switching interface language', snapBad: 'Warning: book text changed', noCfg: 'Fill in the Supabase values in js/config.js', pickCh: 'Pick a chapter' }
+};
+const LANG_TAG = { 'kk|cyrillic': 'kk-Cyrl', 'kk|latin': 'kk-Latn', 'kk|arabic': 'kk-Arab', 'ru|cyrillic': 'ru', 'zh|han': 'zh', 'en|latin': 'en' };
+
+const $ = (s) => document.querySelector(s);
+const enc = new TextEncoder();
+let uiLang = 'kk';
+let baseline = null;
+const chapterIndex = [];
+
+const t = (k) => (I18N[uiLang] && I18N[uiLang][k]) || I18N.kk[k] || k;
+
+async function sha256(text) {
+  const buf = await crypto.subtle.digest('SHA-256', enc.encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function el(tag, attrs, text) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function applyI18n() {
+  document.documentElement.lang = uiLang;
+  document.querySelectorAll('[data-i18n]').forEach((n) => { n.textContent = t(n.dataset.i18n); });
+  document.querySelectorAll('[data-state]').forEach((n) => {
+    const base = n.dataset.state === 'ok' ? t('hashOk') : t('hashBad');
+    n.textContent = (n.dataset.n ? n.dataset.n + ' ' + t('chars') + ' · ' : '') + base;
+  });
+}
+
+function snapshotText() {
+  return [...document.querySelectorAll('.book-text')].map((n) => n.textContent).join('\u0001');
+}
+
+async function checkSnapshot() {
+  if (baseline === null) return;
+  const now = await sha256(snapshotText());
+  const box = $('#snap');
+  box.className = 'status ' + (now === baseline ? 'ok' : 'bad');
+  box.textContent = now === baseline ? t('snapSame') : t('snapBad');
+}
+
+async function loadBooks() {
+  const url = SUPABASE_URL + '/rest/v1/books'
+    + '?select=id,title,author,description,language,script,text_direction,chapters(id,chapter_number,title,content,content_sha256)'
+    + '&status=eq.published&copyright_note=eq.__test__&order=created_at.asc';
+  const r = await fetch(url, { headers: { apikey: SUPABASE_KEY } });
+  if (!r.ok) throw new Error(r.status + ' ' + (await r.text()));
+  return r.json();
+}
+
+async function renderBooks(books) {
+  const root = $('#books');
+  root.textContent = '';
+  const cmp = $('#cmp');
+  cmp.textContent = '';
+  cmp.appendChild(el('option', { value: '' }, '—'));
+  chapterIndex.length = 0;
+
+  for (const b of books) {
+    const tag = LANG_TAG[b.language + '|' + b.script] || b.language;
+    const card = el('div', { class: 'card' });
+    card.appendChild(el('h2', { class: 'book-text', dir: 'auto', lang: tag }, b.title));
+    card.appendChild(el('div', { class: 'book-text', dir: 'auto', lang: tag }, b.author));
+    if (b.description) card.appendChild(el('div', { class: 'book-text', dir: 'auto', lang: tag }, b.description));
+    card.appendChild(el('div', { class: 'meta' }, b.language + ' / ' + b.script + ' / ' + b.text_direction));
+
+    const chs = (b.chapters || []).slice().sort((a, c) => a.chapter_number - c.chapter_number);
+    for (const ch of chs) {
+      card.appendChild(el('h3', { class: 'book-text', dir: 'auto', lang: tag }, ch.chapter_number + '. ' + ch.title));
+      card.appendChild(el('div', { class: 'content book-text', dir: b.text_direction, lang: tag }, ch.content));
+      const local = await sha256(ch.content);
+      const same = local === ch.content_sha256;
+      const row = el('div', { class: 'row ' + (same ? 'ok' : 'bad'), 'data-state': same ? 'ok' : 'bad', 'data-n': String([...ch.content].length) });
+      card.appendChild(row);
+      card.appendChild(el('div', { class: 'row' }, 'DB: ' + ch.content_sha256 + '  |  browser: ' + local));
+      chapterIndex.push({ label: b.title + ' / ' + ch.chapter_number, hash: ch.content_sha256 });
+      cmp.appendChild(el('option', { value: ch.content_sha256 }, b.title + ' / ' + ch.chapter_number));
+    }
+    root.appendChild(card);
+  }
+  applyI18n();
+  baseline = await sha256(snapshotText());
+  await checkSnapshot();
+}
+
+async function updatePaste() {
+  const text = $('#paste').value;
+  const pv = $('#preview');
+  pv.textContent = text;
+  pv.setAttribute('dir', $('#pdir').value);
+  pv.setAttribute('lang', $('#plang').value);
+  const h = await sha256(text);
+  $('#pasteHash').textContent = 'SHA-256: ' + h + '  (' + [...text].length + ' ' + t('chars') + ')';
+  const want = $('#cmp').value;
+  const res = $('#pasteResult');
+  if (!want) { res.className = 'status'; res.textContent = t('pickCh'); return; }
+  res.className = 'status ' + (want === h ? 'ok' : 'bad');
+  res.textContent = want === h ? t('hashOk') : t('hashBad');
+}
+
+function bind() {
+  $('#uiLang').addEventListener('change', async (e) => { uiLang = e.target.value; applyI18n(); updatePaste(); await checkSnapshot(); });
+  $('#fontArab').addEventListener('change', (e) => document.documentElement.style.setProperty('--f-arab', "'" + e.target.value + "'"));
+  $('#fontOther').addEventListener('change', (e) => document.documentElement.style.setProperty('--f-other', "'" + e.target.value + "'"));
+  $('#size').addEventListener('input', (e) => {
+    document.documentElement.style.setProperty('--size', e.target.value + 'px');
+    $('#sizeOut').textContent = e.target.value;
+  });
+  ['#paste', '#pdir', '#plang', '#cmp'].forEach((s) => {
+    $(s).addEventListener('input', updatePaste);
+    $(s).addEventListener('change', updatePaste);
+  });
+}
+
+async function init() {
+  bind();
+  applyI18n();
+  const st = $('#state');
+  if (!SUPABASE_URL || SUPABASE_URL.includes('把这里换成') || SUPABASE_KEY.includes('把这里换成')) {
+    st.className = 'status bad'; st.textContent = t('noCfg'); return;
+  }
+  st.textContent = t('loading');
+  try {
+    const books = await loadBooks();
+    if (!books.length) { st.className = 'status bad'; st.textContent = t('noData'); return; }
+    st.textContent = '';
+    await renderBooks(books);
+  } catch (err) {
+    st.className = 'status bad';
+    st.textContent = t('loadFail') + ': ' + err.message;
+  }
+}
+init();
+</script>
+</body>
+</html>
