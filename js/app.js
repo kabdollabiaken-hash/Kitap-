@@ -1,9 +1,10 @@
 import { t, initLang, setLang, getLang, LANGS, checkI18n, localized } from './i18n.js';
+import './messages-shelf.js';
 import { storage } from './storage.js';
 import { parseHash, onRouteChange, navigate } from './router.js';
 import { listBooks, getCategories, getBook, getChapterList, langTag } from './api.js';
 
-for (const href of ['./css/pages.css', './css/book.css']) {
+for (const href of ['./css/pages.css', './css/book.css', './css/shelf.css']) {
   document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'stylesheet', href }));
 }
 
@@ -271,7 +272,10 @@ function bookDetail(book, chapters, cats) {
       storage.removeFromShelf(book.id);
       status.textContent = t('book.removed');
     } else {
-      storage.addToShelf({ id: book.id, title: book.title, author: book.author });
+      storage.addToShelf({
+        id: book.id, title: book.title, author: book.author,
+        cover_url: book.cover_url, language: book.language, script: book.script
+      });
       status.textContent = t('book.added');
     }
     refreshShelf();
@@ -329,14 +333,68 @@ function viewBook() {
   return root;
 }
 
+// ---------- 书架（微信读书式：三列封面网格）----------
 function viewShelf() {
-  const shelf = storage.getShelf();
-  return h('div', {},
-    h('h1', {}, t('shelf.title')),
-    shelf.length
-      ? h('ul', { class: 'list' }, shelf.map((b) =>
-        h('li', {}, h('a', { href: '#/book/' + enc(b.bookId) }, titleLine(b.title)))))
-      : h('p', { class: 'muted' }, t('shelf.empty')));
+  const root = h('div');
+  let selectMode = false;
+  const selected = new Set();
+
+  // 最近读过或最近加入的排在前面
+  const sortedShelf = () => {
+    const recent = new Map(storage.getRecent().map((r) => [r.bookId, r.ts || 0]));
+    return storage.getShelf()
+      .map((b) => ({ ...b, last: Math.max(b.addedAt || 0, recent.get(b.bookId) || 0) }))
+      .sort((a, b) => b.last - a.last);
+  };
+
+  const draw = () => {
+    const items = sortedShelf();
+    for (const id of [...selected]) if (!items.some((i) => i.bookId === id)) selected.delete(id);
+    if (!items.length) selectMode = false;
+
+    const head = h('div', { class: 'sh-head' },
+      h('h1', {}, t('shelf.title')),
+      items.length
+        ? h('button', {
+          class: 'sh-sel', type: 'button',
+          onclick: () => { selectMode = !selectMode; selected.clear(); draw(); }
+        }, t(selectMode ? 'shelf.done' : 'shelf.select'))
+        : null);
+
+    const card = (b) => {
+      const tag = langTag(b);
+      const on = selected.has(b.bookId);
+      const kids = [
+        h('div', { class: 'sh-cover' },
+          cover({ id: b.bookId, title: b.title, cover_url: b.cover_url, language: b.language, script: b.script }),
+          selectMode ? h('span', { class: 'sh-check' + (on ? ' on' : ''), 'aria-hidden': 'true' }, on ? '✓' : '') : null),
+        h('div', { class: 'sh-title', lang: tag, dir: 'auto' }, b.title)
+      ];
+      return selectMode
+        ? h('button', {
+          class: 'sh-item', type: 'button', 'aria-pressed': on ? 'true' : 'false',
+          onclick: () => { if (selected.has(b.bookId)) selected.delete(b.bookId); else selected.add(b.bookId); draw(); }
+        }, kids)
+        : h('a', { class: 'sh-item', href: '#/book/' + enc(b.bookId) }, kids);
+    };
+
+    const body = items.length
+      ? h('div', { class: 'sh-grid' }, items.map(card))
+      : h('p', { class: 'muted' }, t('shelf.empty'));
+
+    const bar = selectMode && items.length
+      ? h('div', { class: 'sh-bar' },
+        h('button', {
+          class: 'btn', type: 'button', disabled: selected.size === 0,
+          onclick: () => { storage.removeManyFromShelf([...selected]); selected.clear(); draw(); }
+        }, t('shelf.remove', { n: selected.size })))
+      : null;
+
+    root.replaceChildren(head, body, bar);
+  };
+
+  draw();
+  return root;
 }
 
 function viewPlaceholder(titleKey) {
