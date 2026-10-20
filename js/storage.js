@@ -1,4 +1,4 @@
-// 本机存储模块：书架、最近阅读、阅读进度、偏好
+// 本机存储模块：书架、最近阅读、阅读进度、阅读时长、偏好
 // 所有书名、作者原样保存，不做任何修改。
 const PREFIX = 'kitap:v1:';
 const SCHEMA_VERSION = 1;
@@ -74,6 +74,12 @@ const isArr = (v) => Array.isArray(v);
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const cleanBook = (b) => b && typeof b.bookId === 'string' && typeof b.title === 'string';
 
+// 本地日期 YYYY-MM-DD
+function dayKey(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
 export const storage = {
   isPersistent() { return ls !== null; },
 
@@ -128,5 +134,24 @@ export const storage = {
     const all = read('progress', {}, isObj);
     all[bookId] = { chapterId, ratio: Math.min(1, Math.max(0, ratio)), ts: Date.now() };
     write('progress', all);
+  },
+
+  // 阅读时长：按本地日期累计秒数，例如 {"2026-10-20": 1234}，只保留最近 400 天
+  getReadTime() {
+    const m = read('readtime', {}, isObj);
+    const o = {};
+    for (const [k, v] of Object.entries(m)) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(k) && Number.isFinite(v) && v >= 0) o[k] = v;
+    }
+    return o;
+  },
+  addReadTime(seconds) {
+    if (!Number.isFinite(seconds) || seconds <= 0) return;
+    const m = this.getReadTime();
+    const k = dayKey();
+    m[k] = (m[k] || 0) + Math.round(seconds);
+    const keys = Object.keys(m).sort();
+    while (keys.length > 400) delete m[keys.shift()];
+    write('readtime', m);
   }
 };
