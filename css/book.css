@@ -1,0 +1,15 @@
+.bk { display: flex; flex-wrap: wrap; gap: 24px 32px; align-items: flex-start; margin-block-end: 32px; }
+.bk-cover { flex: 0 0 200px; width: 200px; max-width: 100%; }
+.bk-info { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.bk-info h1 { margin: 0; font-size: 28px; line-height: 1.3; overflow-wrap: anywhere; }
+.bk-author { font-size: 16px; color: var(--muted); overflow-wrap: anywhere; }
+.bk-desc { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.bk-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.bk-meta { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.tag + .tag { margin-inline-start: 6px; }
+
+.toc { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.toc li + li { border-block-start: 1px solid var(--line); }
+.toc a { display: flex; gap: 12px; align-items: baseline; padding: 14px 16px; min-height: 48px; }
+.toc .num { color: var(--muted); min-width: 2.5em; font-variant-numeric: tabular-nums; }
+.toc a[aria-current="true"] { background: var(--accent-soft); font-weight: 600; }
