@@ -33,6 +33,7 @@ button:disabled{opacity:.5}
 .bt{font-weight:600;font-size:16px}
 ul.ch{margin:8px 0;padding-left:20px;font-size:13px}
 ul.ch li.bad{color:#c0392b}
+.thumb{width:72px;height:96px;object-fit:cover;border-radius:6px;background:#e9edf0;display:block;margin-top:6px}
 .top{display:flex;justify-content:space-between;align-items:center}
 </style>
 </head>
@@ -115,8 +116,8 @@ const SCRIPT = { cyrillic: '西里尔', latin: '拉丁', arabic: '阿拉伯', ha
 
 async function viewBooks(box) {
   box.append(h('p', { class: 'muted' }, '加载中…'));
-  let books;
-  try { books = (await api('list')).books; } catch (e) { box.replaceChildren(h('p', { class: 'err' }, e.message)); return; }
+  let books; let cats = [];
+  try { books = (await api('list')).books; cats = (await api('categories')).categories; } catch (e) { box.replaceChildren(h('p', { class: 'err' }, e.message)); return; }
   const draw = () => {
     if (!books.length) { box.replaceChildren(h('p', { class: 'muted' }, '还没有书。去“上传新书”添加。')); return; }
     box.replaceChildren(...books.map((b) => {
@@ -132,11 +133,17 @@ async function viewBooks(box) {
         row.append(h('button', { class: 'ghost', onclick: () => act(async () => { await api('set_status', { id: b.id, status: 'hidden' }); b.status = 'hidden'; draw(); }) }, '下架'));
       }
       row.append(h('button', { class: 'ghost', onclick: () => act(async () => { await api('set_featured', { id: b.id, value: !b.is_featured }); b.is_featured = !b.is_featured; draw(); }) }, b.is_featured ? '取消推荐' : '设为推荐'));
+      row.append(h('button', { class: 'ghost', onclick: () => {
+        const ex = card.querySelector('.editbox');
+        if (ex) { ex.remove(); return; }
+        card.append(editForm(b, cats, draw));
+      } }, '编辑'));
       row.append(h('button', { class: 'danger', onclick: () => {
         if (!confirm('永久删除《' + b.title + '》和它的全部章节？不能恢复。')) return;
         act(async () => { await api('delete', { id: b.id }); books = books.filter((x) => x.id !== b.id); draw(); });
       } }, '删除'));
-      return h('div', { class: 'card' },
+      const card = h('div', { class: 'card' },
+        b.cover_url ? h('img', { class: 'thumb', src: b.cover_url, alt: '' }) : null,
         h('div', { class: 'bt', dir: 'auto' }, b.title),
         h('div', { class: 'muted', dir: 'auto' }, b.author),
         h('div', { style: 'margin-top:6px' },
@@ -146,9 +153,74 @@ async function viewBooks(box) {
           b.is_featured ? h('span', { class: 'badge' }, '推荐') : null),
         h('div', { class: 'muted', dir: 'auto', style: 'margin-top:6px' }, '版权：' + (b.copyright_note || '—')),
         row, msg);
+      return card;
     }));
   };
   draw();
+}
+
+// ---------- 编辑 ----------
+async function toJpegBase64(file) {
+  const bmp = await createImageBitmap(file);
+  const s = Math.min(1, 600 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(bmp, 0, 0, c.width, c.height);
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+function editForm(b, cats, redraw) {
+  const catSlug = (cats.find((c) => c.id === b.category_id) || {}).slug || '';
+  const f = {
+    title: h('input', { dir: 'auto', value: b.title }),
+    author: h('input', { dir: 'auto', value: b.author }),
+    desc: h('textarea', { dir: 'auto' }),
+    cover: h('input', { type: 'url', placeholder: 'https://…' }),
+    cat: h('select', {}, h('option', { value: '' }, '（不分类）'), cats.map((c) => h('option', { value: c.slug }, (c.name && (c.name.zh || c.name.en || c.name.kk)) || c.slug))),
+    note: h('textarea', { dir: 'auto' }),
+    dir: h('select', {}, ['ltr', 'rtl', 'auto'].map((k) => h('option', { value: k }, { ltr: '从左到右', rtl: '从右到左', auto: '自动' }[k]))),
+    img: h('input', { type: 'file', accept: 'image/*' })
+  };
+  f.desc.value = b.description || '';
+  f.cover.value = b.cover_url || '';
+  f.cat.value = catSlug;
+  f.note.value = b.copyright_note || '';
+  f.dir.value = b.text_direction || 'auto';
+  const msg = h('div', { class: 'muted' });
+  const save = h('button', {}, '保存修改');
+  save.addEventListener('click', async () => {
+    save.disabled = true; msg.className = 'muted'; msg.textContent = '保存中…';
+    try {
+      await api('update_book', { id: b.id, fields: {
+        title: f.title.value, author: f.author.value, description: f.desc.value,
+        cover_url: f.cover.value.trim(), category_slug: f.cat.value,
+        copyright_note: f.note.value, text_direction: f.dir.value
+      } });
+      b.title = f.title.value; b.author = f.author.value; b.description = f.desc.value || null;
+      b.cover_url = f.cover.value.trim() || null; b.copyright_note = f.note.value; b.text_direction = f.dir.value;
+      b.category_id = (cats.find((c) => c.slug === f.cat.value) || {}).id || null;
+      if (f.img.files[0]) {
+        msg.textContent = '上传封面…';
+        const data = await toJpegBase64(f.img.files[0]);
+        b.cover_url = (await api('upload_cover', { id: b.id, data })).cover_url;
+      }
+      redraw();
+    } catch (e) { msg.className = 'err'; msg.textContent = e.message; save.disabled = false; }
+  });
+  const field = (label, el) => [h('label', {}, label), el];
+  return h('div', { class: 'editbox' },
+    field('书名', f.title), field('作者', f.author), field('简介', f.desc),
+    field('分类', f.cat), field('版权来源', f.note), field('文字方向', f.dir),
+    field('封面：选一张图片上传（自动压缩）', f.img),
+    field('或者填封面图片地址（https://…）', f.cover),
+    h('p', { class: 'muted' }, '语言和文字不能修改。选了图片会优先使用图片。'),
+    h('div', { class: 'row' }, save), msg);
 }
 
 // ---------- 上传 ----------
