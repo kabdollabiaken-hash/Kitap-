@@ -1,9 +1,11 @@
 import { t, initLang, setLang, getLang, LANGS, checkI18n, localized } from './i18n.js';
 import { storage } from './storage.js';
 import { parseHash, onRouteChange, navigate } from './router.js';
-import { listBooks, getCategories, langTag } from './api.js';
+import { listBooks, getCategories, getBook, getChapterList, langTag } from './api.js';
 
-document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: './css/pages.css' }));
+for (const href of ['./css/pages.css', './css/book.css']) {
+  document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'stylesheet', href }));
+}
 
 const app = document.getElementById('app');
 let route = parseHash();
@@ -72,6 +74,8 @@ function libHref({ q, cat, page } = {}) {
   return '#/library' + (s ? '?' + s : '');
 }
 
+const enc = encodeURIComponent;
+
 // ---------- 书籍卡片 ----------
 function cover(b) {
   if (b.cover_url) {
@@ -84,15 +88,19 @@ function cover(b) {
     h('span', { lang: langTag(b), dir: 'auto' }, b.title));
 }
 
-function bookCard(b) {
-  const tag = langTag(b);
+function bookLabel(b) {
   let label = t('langname.' + b.language);
   if (b.language === 'kk') label += ' · ' + t('script.' + b.script);
-  return h('a', { class: 'bcard', href: '#/book/' + encodeURIComponent(b.id) },
+  return label;
+}
+
+function bookCard(b) {
+  const tag = langTag(b);
+  return h('a', { class: 'bcard', href: '#/book/' + enc(b.id) },
     cover(b),
     h('div', { class: 'bt', lang: tag, dir: 'auto' }, b.title),
     h('div', { class: 'ba', lang: tag, dir: 'auto' }, b.author),
-    h('div', {}, h('span', { class: 'tag' }, label)));
+    h('div', {}, h('span', { class: 'tag' }, bookLabel(b))));
 }
 
 const bookGrid = (items) => h('div', { class: 'grid' }, items.map(bookCard));
@@ -122,7 +130,7 @@ function renderHeader() {
     onsubmit: (e) => {
       e.preventDefault();
       const q = input.value.trim();
-      navigate(q ? '/library?q=' + encodeURIComponent(q) : '/library');
+      navigate(q ? '/library?q=' + enc(q) : '/library');
     }
   }, input);
 
@@ -159,7 +167,7 @@ function viewHome() {
   if (recent.length) {
     root.append(section(t('home.continue'),
       h('ul', { class: 'list' }, recent.slice(0, 5).map((b) =>
-        h('li', {}, h('a', { href: '#/book/' + encodeURIComponent(b.bookId) }, titleLine(b.title)))))));
+        h('li', {}, h('a', { href: '#/book/' + enc(b.bookId) }, titleLine(b.title)))))));
   }
 
   const catBox = h('div');
@@ -236,12 +244,98 @@ function viewLibrary() {
   return root;
 }
 
+// ---------- 书籍详情 ----------
+function bookMissing() {
+  return h('div', {},
+    h('h1', {}, t('book.notfound')),
+    h('a', { class: 'btn', href: '#/library' }, t('book.toLibrary')));
+}
+
+function bookDetail(book, chapters, cats) {
+  const tag = langTag(book);
+  const cat = cats.find((c) => c.id === book.category_id);
+  const progress = storage.getProgress(book.id);
+  const resume = progress ? chapters.find((c) => c.id === progress.chapterId) : null;
+  const target = resume || chapters[0] || null;
+
+  // 加入/移出书架
+  const status = h('span', { class: 'muted', role: 'status' });
+  const shelfBtn = h('button', { class: 'btn ghost', type: 'button' });
+  const refreshShelf = () => {
+    const on = storage.isInShelf(book.id);
+    shelfBtn.textContent = t(on ? 'book.removeShelf' : 'book.addShelf');
+    shelfBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  };
+  shelfBtn.addEventListener('click', () => {
+    if (storage.isInShelf(book.id)) {
+      storage.removeFromShelf(book.id);
+      status.textContent = t('book.removed');
+    } else {
+      storage.addToShelf({ id: book.id, title: book.title, author: book.author });
+      status.textContent = t('book.added');
+    }
+    refreshShelf();
+  });
+  refreshShelf();
+
+  // 开始/继续阅读：没有章节时不打开阅读器
+  const startEl = target
+    ? h('a', { class: 'btn', href: '#/read/' + enc(book.id) + '/' + enc(target.id) }, t(resume ? 'home.continue' : 'book.start'))
+    : h('span', { class: 'btn disabled', 'aria-disabled': 'true' }, t('book.start'));
+
+  // 内部测试标记（以 __ 开头）不显示
+  const showCopyright = book.copyright_note && !String(book.copyright_note).startsWith('__');
+
+  const info = h('div', { class: 'bk-info' },
+    h('h1', { lang: tag, dir: 'auto' }, book.title),
+    h('div', { class: 'bk-author', lang: tag, dir: 'auto' }, book.author),
+    h('div', {},
+      h('span', { class: 'tag' }, bookLabel(book)),
+      cat ? h('span', { class: 'tag' }, localized(cat.name)) : null),
+    h('div', { class: 'bk-actions' }, startEl, shelfBtn, status),
+    resume ? h('div', { class: 'bk-meta' }, t('book.progress', { n: resume.chapter_number, p: Math.round(progress.ratio * 100) })) : null,
+    target ? null : h('p', { class: 'bad' }, t('book.nochapters')),
+    book.description ? h('p', { class: 'bk-desc', lang: tag, dir: 'auto' }, book.description) : null,
+    showCopyright ? h('div', { class: 'bk-meta' }, t('book.copyright') + ': ', h('span', { dir: 'auto' }, book.copyright_note)) : null);
+
+  const toc = chapters.length
+    ? section(t('book.contents'),
+      h('ol', { class: 'toc' }, chapters.map((ch) => {
+        const chTag = langTag({ language: ch.language || book.language, script: ch.script || book.script });
+        return h('li', {},
+          h('a', { href: '#/read/' + enc(book.id) + '/' + enc(ch.id), 'aria-current': resume && resume.id === ch.id ? 'true' : null },
+            h('span', { class: 'num' }, ch.chapter_number + '.'),
+            h('span', { lang: chTag, dir: 'auto' }, ch.title)));
+      })))
+    : null;
+
+  return h('div', {},
+    h('div', { class: 'bk' }, h('div', { class: 'bk-cover' }, cover(book)), info),
+    toc);
+}
+
+function viewBook() {
+  const id = route.params.id;
+  const root = h('div');
+  loadInto(root, async () => {
+    const book = await getBook(id);
+    if (!book) return bookMissing();
+    const [chapters, cats] = await Promise.all([
+      getChapterList(book.id),
+      getCategories().catch(() => [])
+    ]);
+    return bookDetail(book, chapters, cats);
+  });
+  return root;
+}
+
 function viewShelf() {
   const shelf = storage.getShelf();
   return h('div', {},
     h('h1', {}, t('shelf.title')),
     shelf.length
-      ? h('ul', { class: 'list' }, shelf.map((b) => h('li', {}, titleLine(b.title))))
+      ? h('ul', { class: 'list' }, shelf.map((b) =>
+        h('li', {}, h('a', { href: '#/book/' + enc(b.bookId) }, titleLine(b.title)))))
       : h('p', { class: 'muted' }, t('shelf.empty')));
 }
 
@@ -297,7 +391,7 @@ function renderView() {
     case 'home': return viewHome();
     case 'library': return viewLibrary();
     case 'shelf': return viewShelf();
-    case 'book': return viewPlaceholder('library.title');
+    case 'book': return viewBook();
     case 'read': return viewPlaceholder('library.title');
     case 'dev': return viewDev();
     default: return viewNotFound();
