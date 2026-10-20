@@ -241,6 +241,13 @@ export function setLang(code) {
   document.documentElement.lang = code;
 }
 
+// 其他模块追加自己的界面文案：addMessages({ kk: {...}, ru: {...}, zh: {...}, en: {...} })
+export function addMessages(bundle) {
+  for (const code of Object.keys(bundle)) {
+    if (dict[code]) Object.assign(dict[code], bundle[code]);
+  }
+}
+
 export function t(key, params) {
   let s = dict[current][key];
   if (s === undefined) {
