@@ -1,0 +1,48 @@
+.sec { margin-block-end: 32px; }
+.sec-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.sec-h a { color: var(--accent); font-size: 14px; font-weight: 600; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 24px 16px; }
+.bcard { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cover {
+  aspect-ratio: 3 / 4;
+  border-radius: 4px 8px 8px 4px;
+  overflow: hidden;
+  box-shadow: 0 6px 16px rgba(28, 32, 36, .15);
+  background: #d9dee3;
+}
+.cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cover.gen { display: flex; align-items: flex-end; padding: 14px 12px; color: #fff; }
+.cover.gen span {
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.bt { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.ba { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.tag {
+  display: inline-block; font-size: 11px; padding: 2px 6px; border-radius: 4px;
+  background: var(--accent-soft); color: #0a5f52;
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-block-end: 20px; }
+.chip {
+  padding-inline: 14px; min-height: 40px; display: inline-flex; align-items: center;
+  border: 1px solid var(--line); border-radius: 20px; background: var(--surface); font-size: 14px;
+}
+.chip[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+.pager { display: flex; align-items: center; justify-content: center; gap: 16px; margin-block-start: 28px; }
+.btn.ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.btn.disabled { opacity: .45; pointer-events: none; }
+.link { color: var(--accent); font-weight: 600; }
+
+/* 按书籍实际文字体系选择字体（html 根元素除外，避免界面语言影响全站字体） */
+body [lang="kk-Arab"] { font-family: 'Scheherazade New', serif; line-height: 1.8; }
+body [lang="kk-Cyrl"], body [lang="kk-Latn"], body [lang="ru"], body [lang="en"] { font-family: 'Noto Serif', serif; }
+body [lang="zh"] { font-family: 'Noto Serif SC', serif; }
