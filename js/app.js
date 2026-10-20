@@ -1,12 +1,15 @@
 import { t, initLang, setLang, getLang, LANGS, checkI18n, localized } from './i18n.js';
 import './messages-shelf.js';
+import './messages-home.js';
+import './readtime.js';
 import { storage } from './storage.js';
 import { parseHash, onRouteChange, navigate } from './router.js';
 import { listBooks, getCategories, getBook, getChapterList, langTag } from './api.js';
+import { getBooksByIds } from './api-extra.js';
 import { h, enc, loadInto } from './ui.js';
 import { viewReader, leaveReader } from './reader.js';
 
-for (const href of ['./css/pages.css', './css/book.css', './css/shelf.css', './css/reader.css']) {
+for (const href of ['./css/pages.css', './css/book.css', './css/shelf.css', './css/reader.css', './css/home.css']) {
   document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'stylesheet', href }));
 }
 
@@ -123,19 +126,109 @@ function renderTabbar() {
     NAV.map((n) => h('a', { href: n.href, 'aria-current': n.id === active ? 'page' : null }, icon(n.id), t(n.key))));
 }
 
-// ---------- 页面 ----------
-function titleLine(text) { return h('div', { dir: 'auto' }, text); }
+// ---------- 首页：继续阅读 + 阅读时长 + 在读的书 ----------
+const pad2 = (n) => String(n).padStart(2, '0');
+const dateKey = (d) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+
+function readingStats() {
+  const map = storage.getReadTime();
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+
+  const monthDays = [];
+  let monthTotal = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const s = map[y + '-' + pad2(m + 1) + '-' + pad2(d)] || 0;
+    monthDays.push(s);
+    monthTotal += s;
+  }
+
+  const dow = (now.getDay() + 6) % 7; // 周一 = 0
+  const weekDays = [];
+  let weekTotal = 0;
+  for (let i = 0; i < 7; i++) {
+    const s = map[dateKey(new Date(y, m, now.getDate() - dow + i))] || 0;
+    weekDays.push(s);
+    weekTotal += s;
+  }
+  return { now, monthDays, monthTotal, weekDays, weekTotal, todayIndex: dow, todayDate: now.getDate() };
+}
+
+// 把 "小于{n}分钟" 这类模板拆开，让数字单独放大显示
+function tplNum(key, n) {
+  const parts = t(key).split('{n}');
+  return [parts[0] || '', h('b', { class: 'st-num' }, String(n)), parts[1] || ''];
+}
+
+function duration(sec) {
+  const min = Math.floor(sec / 60);
+  if (min < 1) return h('div', { class: 'st-val' }, tplNum('stats.lt', 1));
+  const hr = Math.floor(min / 60);
+  const mm = min % 60;
+  return h('div', { class: 'st-val' },
+    hr ? tplNum('stats.hour', hr) : null,
+    (mm || !hr) ? tplNum('stats.min', mm) : null);
+}
+
+function statCards() {
+  const s = readingStats();
+  const locale = { kk: 'kk', ru: 'ru', zh: 'zh-CN', en: 'en' }[getLang()] || 'en';
+  let monthName;
+  try { monthName = new Intl.DateTimeFormat(locale, { month: 'long' }).format(s.now); } catch (e) { monthName = String(s.now.getMonth() + 1); }
+  const weekdayLabel = (i) => {
+    try { return new Intl.DateTimeFormat(locale, { weekday: 'narrow' }).format(new Date(2024, 0, 1 + i)); } catch (e) { return String(i + 1); }
+  };
+
+  const monthCard = h('div', { class: 'st-card' },
+    h('div', { class: 'st-title' }, t('stats.month', { month: monthName })),
+    duration(s.monthTotal),
+    h('div', { class: 'st-ticks', 'aria-hidden': 'true' },
+      s.monthDays.map((v, i) => h('span', { class: v > 0 ? 'on' : (i + 1 === s.todayDate ? 'today' : null) }))));
+
+  const weekCard = h('div', { class: 'st-card' },
+    h('div', { class: 'st-title' }, t('stats.week')),
+    duration(s.weekTotal),
+    h('div', { class: 'st-week', 'aria-hidden': 'true' },
+      s.weekDays.map((v, i) => h('div', { class: 'st-day' + (i === s.todayIndex ? ' today' : '') },
+        h('i', { class: v > 0 ? 'on' : null }),
+        h('b', {}, weekdayLabel(i))))));
+
+  return [monthCard, weekCard];
+}
+
+function continueSection() {
+  const recent = storage.getRecent().slice(0, 10);
+  if (!recent.length) return null; // 没有阅读历史时，不显示这个区块
+
+  const row = h('div', { class: 'cr-row' }, statCards());
+  const refs = [];
+  recent.forEach((b) => {
+    const holder = h('div', { class: 'cr-cover' }, cover({ id: b.bookId, title: b.title }));
+    const titleEl = h('div', { class: 'cr-title', dir: 'auto' }, b.title);
+    refs.push({ b, holder, titleEl });
+    row.append(h('a', { class: 'cr-item', href: '#/read/' + enc(b.bookId) }, holder, titleEl));
+  });
+
+  // 先用生成的封面立即显示，再用在线数据换成真实封面
+  getBooksByIds(recent.map((b) => b.bookId)).then((list) => {
+    const map = new Map(list.map((x) => [x.id, x]));
+    refs.forEach(({ b, holder, titleEl }) => {
+      const m = map.get(b.bookId);
+      if (!m) return;
+      holder.replaceChildren(cover({ ...m, title: b.title }));
+      const tag = langTag(m);
+      if (tag) titleEl.setAttribute('lang', tag);
+    });
+  }).catch(() => { /* 没网络时保持生成的封面 */ });
+
+  return h('section', { class: 'sec' }, h('h2', {}, t('home.continue')), row);
+}
 
 function viewHome() {
-  const root = h('div', {}, h('h1', {}, t('home.title')));
-
-  // 没有阅读历史时，不显示继续阅读区
-  const recent = storage.getRecent();
-  if (recent.length) {
-    root.append(section(t('home.continue'),
-      h('ul', { class: 'list' }, recent.slice(0, 5).map((b) =>
-        h('li', {}, h('a', { href: '#/book/' + enc(b.bookId) }, titleLine(b.title)))))));
-  }
+  const cont = continueSection();
+  const root = h('div', {}, h('h1', { class: cont ? 'sr-only' : null }, t('home.title')), cont);
 
   const catBox = h('div');
   root.append(section(t('home.categories'), catBox));
