@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>管理后台</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,"Noto Sans SC","Noto Sans",sans-serif;background:#f4f6f8;color:#1c2024}
+.wrap{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:8px 0 16px}
+.card{background:#fff;border:1px solid #e3e6ea;border-radius:12px;padding:14px;margin-bottom:12px}
+label{display:block;font-size:13px;color:#5d6670;margin:12px 0 4px}
+input,select,textarea{width:100%;min-height:44px;padding:8px 10px;border:1px solid #c9ced4;border-radius:8px;font:inherit;background:#fff;color:inherit}
+textarea{min-height:80px}
+input[type=checkbox]{width:auto;min-height:0;margin-right:8px}
+.chk{display:flex;align-items:center;margin:12px 0;color:#1c2024;font-size:15px}
+button{min-height:44px;padding:0 16px;border:0;border-radius:8px;background:#0e7c6b;color:#fff;font:inherit;cursor:pointer}
+button.ghost{background:#e9edf0;color:#1c2024}
+button.danger{background:#c0392b}
+button:disabled{opacity:.5}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+.tabs button{flex:1}
+.badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;background:#e9edf0;margin-right:6px}
+.badge.published{background:#d5efe8;color:#0a5a4d}
+.badge.hidden{background:#fde8c8;color:#8a5200}
+.badge.draft{background:#e4e4f5;color:#3b3b8a}
+.muted{color:#5d6670;font-size:13px}
+.err{color:#c0392b;white-space:pre-wrap}
+.ok{color:#0a5a4d}
+.bt{font-weight:600;font-size:16px}
+ul.ch{margin:8px 0;padding-left:20px;font-size:13px}
+ul.ch li.bad{color:#c0392b}
+.top{display:flex;justify-content:space-between;align-items:center}
+</style>
+</head>
+<body>
+<div class="wrap" id="root"></div>
+<script>
+'use strict';
+const root = document.getElementById('root');
+let PW = '';
+try { PW = sessionStorage.getItem('kitap-admin') || ''; } catch (e) {}
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'value') el.value = v;
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+async function api(action, data) {
+  const r = await fetch('/api/admin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-password': PW },
+    body: JSON.stringify({ action, ...(data || {}) })
+  });
+  let j;
+  try { j = await r.json(); } catch (e) { j = { error: '服务器返回异常（HTTP ' + r.status + '）。如果是 404，说明接口还没部署成功' }; }
+  if (r.status === 401) { logout(); throw new Error(j.error || '密码不对'); }
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+function logout() {
+  PW = '';
+  try { sessionStorage.removeItem('kitap-admin'); } catch (e) {}
+  renderLogin();
+}
+
+// ---------- 登录 ----------
+function renderLogin(msg) {
+  const pw = h('input', { type: 'password', autocomplete: 'current-password', 'aria-label': '管理密码' });
+  const out = h('p', { class: 'err' }, msg || '');
+  const btn = h('button', { type: 'submit' }, '登录');
+  const form = h('form', { class: 'card', onsubmit: async (e) => {
+    e.preventDefault();
+    btn.disabled = true; out.textContent = '';
+    PW = pw.value;
+    try {
+      await api('categories');
+      try { sessionStorage.setItem('kitap-admin', PW); } catch (x) {}
+      renderMain();
+    } catch (x) { PW = ''; out.textContent = x.message; btn.disabled = false; }
+  } }, h('label', {}, '管理密码'), pw, h('div', { class: 'row' }, btn), out);
+  root.replaceChildren(h('h1', {}, '管理后台'), form);
+}
+
+// ---------- 主界面 ----------
+let tab = 'books';
+function renderMain() {
+  const tabs = h('div', { class: 'tabs' },
+    h('button', { class: tab === 'books' ? '' : 'ghost', onclick: () => { tab = 'books'; renderMain(); } }, '书籍管理'),
+    h('button', { class: tab === 'upload' ? '' : 'ghost', onclick: () => { tab = 'upload'; renderMain(); } }, '上传新书'));
+  const body = h('div');
+  root.replaceChildren(
+    h('div', { class: 'top' }, h('h1', {}, '管理后台'), h('button', { class: 'ghost', onclick: logout }, '退出')),
+    tabs, body);
+  if (tab === 'books') viewBooks(body); else viewUpload(body);
+}
+
+const STATUS = { published: '已上架', hidden: '已下架', draft: '草稿' };
+const LANG = { kk: '哈萨克语', ru: '俄语', zh: '中文', en: '英语' };
+const SCRIPT = { cyrillic: '西里尔', latin: '拉丁', arabic: '阿拉伯', han: '汉字' };
+
+async function viewBooks(box) {
+  box.append(h('p', { class: 'muted' }, '加载中…'));
+  let books;
+  try { books = (await api('list')).books; } catch (e) { box.replaceChildren(h('p', { class: 'err' }, e.message)); return; }
+  const draw = () => {
+    if (!books.length) { box.replaceChildren(h('p', { class: 'muted' }, '还没有书。去“上传新书”添加。')); return; }
+    box.replaceChildren(...books.map((b) => {
+      const msg = h('div', { class: 'err' });
+      const act = async (fn) => {
+        msg.textContent = '';
+        try { await fn(); } catch (e) { msg.textContent = e.message; }
+      };
+      const row = h('div', { class: 'row' });
+      if (b.status !== 'published') {
+        row.append(h('button', { onclick: () => act(async () => { await api('set_status', { id: b.id, status: 'published' }); b.status = 'published'; draw(); }) }, '上架'));
+      } else {
+        row.append(h('button', { class: 'ghost', onclick: () => act(async () => { await api('set_status', { id: b.id, status: 'hidden' }); b.status = 'hidden'; draw(); }) }, '下架'));
+      }
+      row.append(h('button', { class: 'ghost', onclick: () => act(async () => { await api('set_featured', { id: b.id, value: !b.is_featured }); b.is_featured = !b.is_featured; draw(); }) }, b.is_featured ? '取消推荐' : '设为推荐'));
+      row.append(h('button', { class: 'danger', onclick: () => {
+        if (!confirm('永久删除《' + b.title + '》和它的全部章节？不能恢复。')) return;
+        act(async () => { await api('delete', { id: b.id }); books = books.filter((x) => x.id !== b.id); draw(); });
+      } }, '删除'));
+      return h('div', { class: 'card' },
+        h('div', { class: 'bt', dir: 'auto' }, b.title),
+        h('div', { class: 'muted', dir: 'auto' }, b.author),
+        h('div', { style: 'margin-top:6px' },
+          h('span', { class: 'badge ' + b.status }, STATUS[b.status] || b.status),
+          h('span', { class: 'badge' }, (LANG[b.language] || b.language) + (b.language === 'kk' ? ' · ' + (SCRIPT[b.script] || b.script) : '')),
+          h('span', { class: 'badge' }, b.chapter_count + ' 章'),
+          b.is_featured ? h('span', { class: 'badge' }, '推荐') : null),
+        h('div', { class: 'muted', dir: 'auto', style: 'margin-top:6px' }, '版权：' + (b.copyright_note || '—')),
+        row, msg);
+    }));
+  };
+  draw();
+}
+
+// ---------- 上传 ----------
+const SCRIPTS_BY_LANG = { kk: ['cyrillic', 'latin', 'arabic'], ru: ['cyrillic'], zh: ['han'], en: ['latin'] };
+
+async function sha256(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+// 严格读取：不是有效 UTF-8、带 BOM、有乱码字符，都直接报错，不修复
+async function parseChapter(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) throw new Error('开头有 BOM 标记，请用“不带 BOM 的 UTF-8”重新保存');
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (e) { throw new Error('不是有效的 UTF-8 编码'); }
+  if (text.includes('\u0000')) throw new Error('含有空字符，文件可能已损坏');
+  if (text.includes('\uFFFD')) throw new Error('含有乱码字符 �，请先修复源文件');
+  const m = file.name.match(/^(\d+)/);
+  if (!m) throw new Error('文件名必须以数字开头，例如 001.txt');
+  const n = parseInt(m[1], 10);
+  if (n < 1) throw new Error('章节编号必须从 1 开始');
+  const head = text.match(/^([^\r\n]*)\r?\n\r?\n/);
+  if (!head) throw new Error('格式不对：第 1 行标题，第 2 行空行，第 3 行起正文');
+  const title = head[1];
+  if (title.trim() === '') throw new Error('章节标题为空');
+  const content = text.slice(head[0].length);
+  if (content.trim() === '') throw new Error('正文为空');
+  return { n, title, content, sha: await sha256(content), bytes: new TextEncoder().encode(content).length };
+}
+
+async function viewUpload(box) {
+  let cats = [];
+  try { cats = (await api('categories')).categories; } catch (e) { box.append(h('p', { class: 'err' }, e.message)); return; }
+
+  const f = {
+    title: h('input', { dir: 'auto' }),
+    author: h('input', { dir: 'auto' }),
+    lang: h('select', {}, Object.keys(LANG).map((k) => h('option', { value: k }, LANG[k]))),
+    script: h('select'),
+    dir: h('select', {}, ['ltr', 'rtl', 'auto'].map((k) => h('option', { value: k }, { ltr: '从左到右', rtl: '从右到左', auto: '自动' }[k]))),
+    cat: h('select', {}, h('option', { value: '' }, '（不分类）'), cats.map((c) => h('option', { value: c.slug }, (c.name && (c.name.zh || c.name.en || c.name.kk)) || c.slug))),
+    desc: h('textarea', { dir: 'auto' }),
+    cover: h('input', { type: 'url', placeholder: 'https://…（可不填）' }),
+    note: h('textarea', { dir: 'auto', placeholder: '例如：公版（作者逝世超过 70 年）/ 作者授权 / 自己原创' }),
+    feat: h('input', { type: 'checkbox' }),
+    pub: h('input', { type: 'checkbox', checked: true }),
+    rep: h('input', { type: 'checkbox' }),
+    files: h('input', { type: 'file', multiple: true, accept: '.txt,text/plain' })
+  };
+  const fillScripts = () => {
+    f.script.replaceChildren(...SCRIPTS_BY_LANG[f.lang.value].map((s) => h('option', { value: s }, SCRIPT[s])));
+    f.dir.value = f.script.value === 'arabic' ? 'rtl' : 'ltr';
+  };
+  f.lang.addEventListener('change', fillScripts);
+  f.script.addEventListener('change', () => { f.dir.value = f.script.value === 'arabic' ? 'rtl' : 'ltr'; });
+  fillScripts();
+
+  let chapters = [];
+  const preview = h('div');
+  const log = h('div');
+  const go = h('button', {}, '开始上传');
+
+  f.files.addEventListener('change', async () => {
+    chapters = [];
+    preview.replaceChildren(h('p', { class: 'muted' }, '检查文件中…'));
+    const files = [...f.files].sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
+    const items = [];
+    let anyBad = false;
+    for (const file of files) {
+      try {
+        const c = await parseChapter(file);
+        if (c.bytes > MAXCH) throw new Error('单章超过 3.5MB，请拆分');
+        c.file = file.name;
+        chapters.push(c);
+        items.push(h('li', {}, file.name + ' → ', h('span', { dir: 'auto' }, c.title), ' （' + Math.round(c.bytes / 1024) + ' KB）'));
+      } catch (e) {
+        anyBad = true;
+        items.push(h('li', { class: 'bad' }, file.name + '：' + e.message));
+      }
+    }
+    const nums = chapters.map((c) => c.n);
+    const dup = nums.find((n, i) => nums.indexOf(n) !== i);
+    if (dup !== undefined) { anyBad = true; items.push(h('li', { class: 'bad' }, '章节编号重复：' + dup)); }
+    if (anyBad) chapters = [];
+    preview.replaceChildren(
+      h('p', { class: anyBad ? 'err' : 'ok' }, anyBad ? '有文件不合格，修好后重新选择（不会自动修复）' : '✓ 检查通过，共 ' + chapters.length + ' 章'),
+      h('ul', { class: 'ch' }, items));
+  });
+
+  go.addEventListener('click', async () => {
+    log.replaceChildren();
+    const say = (t, cls) => log.append(h('div', { class: cls || 'muted' }, t));
+    const meta = {
+      title: f.title.value, author: f.author.value, language: f.lang.value, script: f.script.value,
+      text_direction: f.dir.value, category_slug: f.cat.value, description: f.desc.value,
+      cover_url: f.cover.value.trim(), copyright_note: f.note.value, is_featured: f.feat.checked
+    };
+    if (!meta.title.trim() || !meta.author.trim()) return say('请填写书名和作者', 'err');
+    if (!meta.copyright_note.trim()) return say('请填写版权来源', 'err');
+    if (!chapters.length) return say('请先选择合格的章节文件', 'err');
+    go.disabled = true;
+    let bookId = null;
+    try {
+      say('创建草稿…');
+      bookId = (await api('create_book', { meta, replace: f.rep.checked })).id;
+      // 分批上传
+      const batches = []; let cur = []; let size = 0;
+      for (const c of chapters) {
+        if (cur.length && size + c.bytes > BATCH) { batches.push(cur); cur = []; size = 0; }
+        cur.push(c); size += c.bytes;
+      }
+      if (cur.length) batches.push(cur);
+      let done = 0;
+      for (const b of batches) {
+        await api('add_chapters', { book_id: bookId, chapters: b.map((c) => ({ n: c.n, title: c.title, content: c.content, sha: c.sha })) });
+        done += b.length;
+        say('已上传 ' + done + ' / ' + chapters.length + ' 章');
+      }
+      say('逐章校验中…');
+      const r = await api('finalize', {
+        book_id: bookId, publish: f.pub.checked,
+        book: { title: meta.title, author: meta.author, description: meta.description || null },
+        expected: chapters.map((c) => ({ n: c.n, title: c.title, sha: c.sha }))
+      });
+      if (!r.ok) {
+        say('✗ 校验失败，这本书保持草稿，读者看不到：', 'err');
+        r.problems.forEach((p) => say('- ' + p, 'err'));
+      } else {
+        say('✓ 校验通过：全部章节与原文一致' + (r.published ? '，已上架' : '，保持草稿（可在书籍管理里上架）'), 'ok');
+      }
+    } catch (e) {
+      say('✗ ' + e.message, 'err');
+      if (bookId) {
+        try { await api('abort', { id: bookId }); say('已撤销这次未完成的草稿', 'muted'); } catch (x) { say('草稿未能自动撤销，请到“书籍管理”删除', 'err'); }
+      }
+    }
+    go.disabled = false;
+  });
+
+  const field = (label, el) => [h('label', {}, label), el];
+  box.replaceChildren(h('div', { class: 'card' },
+    field('书名（原文）', f.title), field('作者（原文）', f.author),
+    field('语言', f.lang), field('文字（哈萨克语才需要选）', f.script), field('文字方向', f.dir),
+    field('分类', f.cat), field('简介（可不填）', f.desc), field('封面图片地址（可不填）', f.cover),
+    field('版权来源（必填）', f.note),
+    h('label', { class: 'chk' }, f.feat, '设为推荐'),
+    h('label', { class: 'chk' }, f.pub, '校验通过后立即上架'),
+    h('label', { class: 'chk' }, f.rep, '覆盖已有的同一本书（同名同作者）'),
+    field('章节文件（.txt，可多选；文件名 001.txt、002.txt…；第 1 行标题，第 2 行空行，第 3 行起正文）', f.files),
+    preview,
+    h('div', { class: 'row' }, go),
+    log));
+}
+const MAXCH = 3500000;
+const BATCH = 2500000;
+
+if (PW) { renderMain(); } else { renderLogin(); }
+</script>
+</body>
+</html>
