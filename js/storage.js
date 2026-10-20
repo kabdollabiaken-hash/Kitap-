@@ -84,17 +84,29 @@ export const storage = {
     return next;
   },
 
-  // 书架：保存书籍 ID，以及书名/作者的原文快照
+  // 书架：保存书籍 ID，以及书名/作者/封面/语言/文字体系的快照
   getShelf() { return read('shelf', [], isArr).filter(cleanBook); },
   isInShelf(bookId) { return this.getShelf().some((b) => b.bookId === bookId); },
-  addToShelf({ id, title, author }) {
+  addToShelf({ id, title, author, cover_url, language, script }) {
     const shelf = this.getShelf();
     if (shelf.some((b) => b.bookId === id)) return;
-    shelf.unshift({ bookId: id, title, author: author || '', addedAt: Date.now() });
+    shelf.unshift({
+      bookId: id,
+      title,
+      author: author || '',
+      cover_url: cover_url || null,
+      language: language || null,
+      script: script || null,
+      addedAt: Date.now()
+    });
     write('shelf', shelf);
   },
   removeFromShelf(bookId) {
     write('shelf', this.getShelf().filter((b) => b.bookId !== bookId));
+  },
+  removeManyFromShelf(bookIds) {
+    const set = new Set(bookIds);
+    write('shelf', this.getShelf().filter((b) => !set.has(b.bookId)));
   },
 
   // 最近阅读：最新的在前，最多 20 本
