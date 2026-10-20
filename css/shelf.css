@@ -1,0 +1,30 @@
+.sh-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-block-end: 20px; }
+.sh-head h1 { margin: 0; }
+.sh-sel { min-height: 44px; padding-inline: 16px; border: 0; background: transparent; color: var(--accent); font-weight: 600; font-size: 16px; cursor: pointer; }
+
+.sh-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px 16px; }
+@media (min-width: 720px) {
+  .sh-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+.sh-item {
+  display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  padding: 0; border: 0; background: transparent; text-align: start; cursor: pointer; font: inherit; color: inherit;
+}
+.sh-cover { position: relative; }
+.sh-title { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.sh-check {
+  position: absolute; inset-block-end: 8px; inset-inline-end: 8px;
+  width: 24px; height: 24px; border-radius: 50%;
+  border: 2px solid #fff; background: rgba(0, 0, 0, .35); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700;
+}
+.sh-check.on { background: var(--accent); border-color: var(--accent); }
+
+.sh-bar {
+  position: fixed; inset-inline: 0; inset-block-end: 0; z-index: 20;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: var(--surface); border-block-start: 1px solid var(--line);
+  display: flex; justify-content: center;
+}
+.btn:disabled { opacity: .45; cursor: not-allowed; }
