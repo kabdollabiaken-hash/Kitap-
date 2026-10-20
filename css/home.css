@@ -1,0 +1,39 @@
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* 横向滚动的一排：时长卡 + 正在读的书 */
+.cr-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  overflow-x: auto; scroll-snap-type: x proximity;
+  margin-inline: -16px; padding: 4px 16px 12px;
+  scrollbar-width: thin;
+}
+.cr-row > * { scroll-snap-align: start; }
+
+.st-card {
+  flex: 0 0 150px; min-height: 160px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px; display: flex; flex-direction: column; gap: 10px;
+}
+@media (min-width: 720px) { .st-card { flex-basis: 200px; } }
+.st-title { font-size: 13px; color: var(--muted); }
+.st-val { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; font-size: 14px; }
+.st-num { font-size: 28px; line-height: 1.1; font-weight: 700; }
+
+.st-ticks { margin-block-start: auto; display: flex; justify-content: space-between; align-items: flex-end; height: 28px; }
+.st-ticks span { width: 2px; height: 100%; border-radius: 1px; background: var(--line); }
+.st-ticks span.on { background: var(--accent); }
+.st-ticks span.today { background: var(--muted); }
+
+.st-week { margin-block-start: auto; display: flex; justify-content: space-between; }
+.st-day { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.st-day i { display: block; width: 14px; height: 14px; border-radius: 3px; background: var(--line); }
+.st-day i.on { background: var(--accent); }
+.st-day b { font-size: 11px; font-weight: 500; color: var(--muted); }
+.st-day.today b { color: var(--ink); font-weight: 700; }
+
+.cr-item { flex: 0 0 120px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.cr-cover { width: 120px; }
+.cr-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
