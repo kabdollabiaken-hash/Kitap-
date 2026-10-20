@@ -4,6 +4,9 @@ import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 const REST = SUPABASE_URL + '/rest/v1/';
 export const PAGE_SIZE = 24;
 const BOOK_FIELDS = 'id,title,author,description,cover_url,category_id,language,script,text_direction,published_at';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const isUuid = (s) => UUID.test(String(s));
 
 async function get(path, params) {
   const url = new URL(REST + path);
@@ -49,6 +52,27 @@ export async function listBooks({ q, categorySlug, page = 1, pageSize = PAGE_SIZ
   }
   const rows = await get('books', params);
   return { items: rows.slice(0, pageSize), hasNext: rows.length > pageSize };
+}
+
+// 单本书详情；不存在或未发布返回 null
+export async function getBook(id) {
+  if (!isUuid(id)) return null;
+  const rows = await get('books', {
+    select: BOOK_FIELDS + ',copyright_note',
+    id: 'eq.' + id,
+    status: 'eq.published',
+    limit: '1'
+  });
+  return rows[0] || null;
+}
+
+// 章节目录：只取编号和标题，不取正文
+export async function getChapterList(bookId) {
+  return get('chapters', {
+    select: 'id,chapter_number,title,language,script',
+    book_id: 'eq.' + bookId,
+    order: 'chapter_number.asc'
+  });
 }
 
 // 书籍实际语言+文字体系 -> HTML lang 标签（用于选择字体和方向，不转换文字）
