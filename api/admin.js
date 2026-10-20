@@ -40,14 +40,14 @@ async function bookStatus(id) {
 
 const actions = {
   async categories() {
-    const rows = await db('GET', 'categories', { params: { select: 'slug,name', order: 'slug.asc' } });
+    const rows = await db('GET', 'categories', { params: { select: 'id,slug,name', order: 'slug.asc' } });
     return { categories: rows };
   },
 
   async list() {
     const rows = await db('GET', 'books', {
       params: {
-        select: 'id,title,author,language,script,status,is_featured,copyright_note,created_at,published_at,chapters(count)',
+        select: 'id,title,author,description,cover_url,category_id,text_direction,language,script,status,is_featured,copyright_note,created_at,published_at,chapters(count)',
         order: 'created_at.desc',
         limit: '500'
       }
@@ -66,6 +66,55 @@ const actions = {
     if (status === 'published') patch.published_at = new Date().toISOString();
     await db('PATCH', 'books', { params: { id: 'eq.' + id }, body: patch });
     return { ok: true };
+  },
+
+  async update_book({ id, fields }) {
+    needId(id);
+    if (!fields || typeof fields !== 'object') throw bad('缺少内容');
+    const need = (k) => {
+      if (typeof fields[k] !== 'string' || fields[k].trim() === '') throw bad('缺少必填项：' + k);
+      return fields[k];
+    };
+    const title = need('title');
+    const author = need('author');
+    const copyright_note = need('copyright_note');
+    if (copyright_note.startsWith('__')) throw bad('版权来源不能以 __ 开头');
+    if (!['ltr', 'rtl', 'auto'].includes(fields.text_direction)) throw bad('文字方向不正确');
+    const description = typeof fields.description === 'string' && fields.description !== '' ? fields.description : null;
+    const cover_url = typeof fields.cover_url === 'string' && fields.cover_url !== '' ? fields.cover_url : null;
+    if (cover_url && !/^https:\/\//i.test(cover_url)) throw bad('封面地址必须以 https:// 开头');
+    let category_id = null;
+    if (typeof fields.category_slug === 'string' && fields.category_slug !== '') {
+      const cats = await db('GET', 'categories', { params: { select: 'id', slug: 'eq.' + fields.category_slug } });
+      if (!cats.length) throw bad('分类不存在');
+      category_id = cats[0].id;
+    }
+    await bookStatus(id);
+    await db('PATCH', 'books', { params: { id: 'eq.' + id }, body: { title, author, description, cover_url, category_id, copyright_note, text_direction: fields.text_direction } });
+    return { ok: true };
+  },
+
+  async upload_cover({ id, data }) {
+    needId(id);
+    await bookStatus(id);
+    if (typeof data !== 'string' || data.length > 1500000) throw bad('图片太大');
+    const buf = Buffer.from(data, 'base64');
+    if (buf.length < 4 || buf[0] !== 0xFF || buf[1] !== 0xD8 || buf[2] !== 0xFF) throw bad('不是 JPEG 图片');
+    const key = process.env.SUPABASE_SERVICE_KEY;
+    const base = process.env.SUPABASE_URL.replace(/\/+$/, '');
+    const sh = { apikey: key, Authorization: 'Bearer ' + key };
+    // 第一次使用时自动创建公开的 covers 存储桶（已存在会返回错误，忽略即可）
+    await fetch(base + '/storage/v1/bucket', {
+      method: 'POST', headers: { ...sh, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'covers', name: 'covers', public: true })
+    }).catch(() => {});
+    const up = await fetch(base + '/storage/v1/object/covers/' + id + '.jpg', {
+      method: 'POST', headers: { ...sh, 'Content-Type': 'image/jpeg', 'x-upsert': 'true' }, body: buf
+    });
+    if (!up.ok) throw new HttpError(500, '封面上传失败 ' + up.status + '：' + (await up.text()).slice(0, 200));
+    const url = base + '/storage/v1/object/public/covers/' + id + '.jpg?v=' + Date.now();
+    await db('PATCH', 'books', { params: { id: 'eq.' + id }, body: { cover_url: url } });
+    return { cover_url: url };
   },
 
   async set_featured({ id, value }) {
