@@ -130,6 +130,20 @@ function renderTabbar() {
 const pad2 = (n) => String(n).padStart(2, '0');
 const dateKey = (d) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
 
+// 月份和星期名称：自己写在代码里，不依赖浏览器的语言数据
+const MONTHS = {
+  kk: ['қаңтар', 'ақпан', 'наурыз', 'сәуір', 'мамыр', 'маусым', 'шілде', 'тамыз', 'қыркүйек', 'қазан', 'қараша', 'желтоқсан'],
+  ru: ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'],
+  zh: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+  en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+};
+const WEEKDAYS = { // 周一到周日
+  kk: ['Дс', 'Сс', 'Ср', 'Бс', 'Жм', 'Сб', 'Жс'],
+  ru: ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'],
+  zh: ['一', '二', '三', '四', '五', '六', '日'],
+  en: ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+};
+
 function readingStats() {
   const map = storage.getReadTime();
   const now = new Date();
@@ -174,12 +188,9 @@ function duration(sec) {
 
 function statCards() {
   const s = readingStats();
-  const locale = { kk: 'kk', ru: 'ru', zh: 'zh-CN', en: 'en' }[getLang()] || 'en';
-  let monthName;
-  try { monthName = new Intl.DateTimeFormat(locale, { month: 'long' }).format(s.now); } catch (e) { monthName = String(s.now.getMonth() + 1); }
-  const weekdayLabel = (i) => {
-    try { return new Intl.DateTimeFormat(locale, { weekday: 'narrow' }).format(new Date(2024, 0, 1 + i)); } catch (e) { return String(i + 1); }
-  };
+  const lang = getLang();
+  const monthName = MONTHS[lang][s.now.getMonth()];
+  const weekdayLabel = (i) => WEEKDAYS[lang][i];
 
   const monthCard = h('div', { class: 'st-card' },
     h('div', { class: 'st-title' }, t('stats.month', { month: monthName })),
