@@ -3,28 +3,15 @@ import './messages-shelf.js';
 import { storage } from './storage.js';
 import { parseHash, onRouteChange, navigate } from './router.js';
 import { listBooks, getCategories, getBook, getChapterList, langTag } from './api.js';
+import { h, enc, loadInto } from './ui.js';
+import { viewReader, leaveReader } from './reader.js';
 
-for (const href of ['./css/pages.css', './css/book.css', './css/shelf.css']) {
+for (const href of ['./css/pages.css', './css/book.css', './css/shelf.css', './css/reader.css']) {
   document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'stylesheet', href }));
 }
 
 const app = document.getElementById('app');
 let route = parseHash();
-
-// ---------- 小工具 ----------
-function h(tag, attrs = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v === null || v === undefined || v === false) continue;
-    if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2), v);
-    else e.setAttribute(k, v === true ? '' : v);
-  }
-  for (const kid of kids.flat()) {
-    if (kid === null || kid === undefined || kid === false) continue;
-    e.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
-  }
-  return e;
-}
 
 // 图标是固定的静态 SVG，不含任何用户数据
 function icon(name) {
@@ -37,25 +24,6 @@ function icon(name) {
   s.setAttribute('aria-hidden', 'true');
   s.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + paths[name] + '</svg>';
   return s;
-}
-
-// 异步加载一个区块：加载中 -> 内容 / 错误+重试。fn 返回 null 表示整个区块隐藏
-async function loadInto(box, fn) {
-  box.replaceChildren(h('p', { class: 'muted' }, t('common.loading')));
-  try {
-    const node = await fn();
-    if (node === null) {
-      const sec = box.closest('section');
-      if (sec) sec.remove(); else box.replaceChildren();
-      return;
-    }
-    box.replaceChildren(node);
-  } catch (e) {
-    console.error(e);
-    box.replaceChildren(h('div', { class: 'card' },
-      h('p', { class: 'bad' }, t('common.error')),
-      h('button', { class: 'btn', type: 'button', onclick: () => loadInto(box, fn) }, t('common.retry'))));
-  }
 }
 
 function section(title, content, moreHref) {
@@ -74,8 +42,6 @@ function libHref({ q, cat, page } = {}) {
   const s = p.toString();
   return '#/library' + (s ? '?' + s : '');
 }
-
-const enc = encodeURIComponent;
 
 // ---------- 书籍卡片 ----------
 function cover(b) {
@@ -397,10 +363,6 @@ function viewShelf() {
   return root;
 }
 
-function viewPlaceholder(titleKey) {
-  return h('div', {}, h('h1', {}, t(titleKey)), h('p', { class: 'muted' }, t('home.soon')));
-}
-
 function viewNotFound() {
   return h('div', {},
     h('h1', {}, t('notfound.title')),
@@ -450,7 +412,6 @@ function renderView() {
     case 'library': return viewLibrary();
     case 'shelf': return viewShelf();
     case 'book': return viewBook();
-    case 'read': return viewPlaceholder('library.title');
     case 'dev': return viewDev();
     default: return viewNotFound();
   }
@@ -458,13 +419,19 @@ function renderView() {
 
 // ---------- 总渲染 ----------
 function render(scrollTop = true) {
+  leaveReader(); // 离开阅读器前先保存进度
   document.title = t('brand');
-  app.replaceChildren(
-    renderHeader(),
-    h('main', { id: 'view', class: 'view' }, renderView()),
-    h('footer', { class: 'foot' }, h('p', {}, t('local.notice'))),
-    renderTabbar()
-  );
+  if (route.name === 'read') {
+    // 阅读器是全屏的，不显示网站的顶栏和底部标签
+    app.replaceChildren(viewReader(route.params));
+  } else {
+    app.replaceChildren(
+      renderHeader(),
+      h('main', { id: 'view', class: 'view' }, renderView()),
+      h('footer', { class: 'foot' }, h('p', {}, t('local.notice'))),
+      renderTabbar()
+    );
+  }
   if (scrollTop) window.scrollTo(0, 0);
 }
 
