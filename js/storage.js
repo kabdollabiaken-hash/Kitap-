@@ -53,9 +53,10 @@ function write(key, val) { return writeRaw(key, JSON.stringify(val)); }
 })();
 
 // ---- 偏好 ----
-const DEFAULT_PREFS = { lang: 'kk', theme: 'white', fontSize: 20, lineHeight: 1.9, margin: 'normal' };
+const DEFAULT_PREFS = { lang: 'kk', theme: 'white', fontSize: 20, lineHeight: 1.9, margin: 'normal', pageMode: 'curl', anim: true };
 const THEMES = ['white', 'sepia', 'green', 'night'];
 const MARGINS = ['narrow', 'normal', 'wide'];
+const PAGE_MODES = ['curl', 'slide', 'scroll'];
 
 function sanitizePrefs(p) {
   const o = { ...DEFAULT_PREFS };
@@ -65,6 +66,8 @@ function sanitizePrefs(p) {
     if (Number.isFinite(p.fontSize)) o.fontSize = Math.min(32, Math.max(14, p.fontSize));
     if (Number.isFinite(p.lineHeight)) o.lineHeight = Math.min(2.6, Math.max(1.4, p.lineHeight));
     if (MARGINS.includes(p.margin)) o.margin = p.margin;
+    if (PAGE_MODES.includes(p.pageMode)) o.pageMode = p.pageMode;
+    if (typeof p.anim === 'boolean') o.anim = p.anim;
   }
   return o;
 }
