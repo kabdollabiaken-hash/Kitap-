@@ -1,0 +1,29 @@
+/* 分页阅读（仿真翻页 / 左右滑动） */
+html:has(body.rd-lock) { overflow: hidden; }
+body.rd-lock { overflow: hidden; height: 100%; }
+
+.rd-paged .rd-bar { position: fixed; inset-inline: 0; inset-block-start: 0; }
+
+.pg-stage {
+  position: fixed; inset-inline: 0; z-index: 1; overflow: hidden;
+  background: var(--bg); perspective: 1800px;
+  touch-action: none; -webkit-user-select: none; user-select: none;
+}
+.pg-layer {
+  position: absolute; inset: 0; background: var(--bg);
+  backface-visibility: hidden; -webkit-backface-visibility: hidden; will-change: transform;
+}
+.pg-clip { position: absolute; left: var(--pg-x); top: var(--pg-y); width: var(--pg-w); height: var(--pg-h); overflow: hidden; }
+.pg-flow {
+  width: var(--pg-w); height: var(--pg-h);
+  column-width: var(--pg-w); column-gap: var(--pg-gap); column-fill: auto;
+}
+.pg-flow .rd-h { margin: 0 0 20px; break-after: avoid; }
+.pg-flow .rd-p { orphans: 2; widows: 2; }
+.pg-flow .rd-note { margin-block-start: 24px; break-inside: avoid; }
+.pg-flow .rd-warn { break-inside: avoid; }
+.pg-shade { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; }
+.pg-num {
+  position: absolute; inset-inline: 0; inset-block-end: 6px; z-index: 5; pointer-events: none;
+  text-align: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
