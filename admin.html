@@ -34,6 +34,8 @@ button:disabled{opacity:.5}
 ul.ch{margin:8px 0;padding-left:20px;font-size:13px}
 ul.ch li.bad{color:#c0392b}
 .thumb{width:72px;height:96px;object-fit:cover;border-radius:6px;background:#e9edf0;display:block;margin-top:6px}
+.convrow{border-top:1px solid #e3e6ea;padding:8px 0}
+.convrow .chk{margin:4px 0}
 .top{display:flex;justify-content:space-between;align-items:center}
 </style>
 </head>
@@ -252,6 +254,266 @@ async function parseChapter(file) {
   return { n, title, content, sha: await sha256(content), bytes: new TextEncoder().encode(content).length };
 }
 
+// ---------- 格式转换（全部在浏览器里完成，不加载任何外部代码） ----------
+const MAX_FILE = 60 * 1024 * 1024;
+
+function decodeStrict(u8) {
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(u8); } catch (e) { throw new Error('文件里有不是 UTF-8 的内容，已停止，不会猜测或修复'); }
+}
+
+async function unzip(buf) {
+  if (typeof DecompressionStream === 'undefined') throw new Error('这个浏览器太旧，不支持解压。请换最新版 Chrome');
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  let e = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+  }
+  if (e < 0) throw new Error('不是有效的 EPUB / DOCX 文件');
+  const count = dv.getUint16(e + 10, true);
+  let p = dv.getUint32(e + 16, true);
+  const files = new Map();
+  for (let k = 0; k < count; k++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('压缩包结构损坏');
+    const nlen = dv.getUint16(p + 28, true);
+    const elen = dv.getUint16(p + 30, true);
+    const clen = dv.getUint16(p + 32, true);
+    const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nlen));
+    files.set(name, { flag: dv.getUint16(p + 8, true), method: dv.getUint16(p + 10, true), csize: dv.getUint32(p + 20, true), usize: dv.getUint32(p + 24, true), off: dv.getUint32(p + 42, true) });
+    p += 46 + nlen + elen + clen;
+  }
+  return {
+    has: (n) => files.has(n),
+    async read(name) {
+      const f = files.get(name);
+      if (!f) return null;
+      if (f.flag & 1) throw new Error('文件已加密，不能读取');
+      if (f.usize > 40 * 1024 * 1024) throw new Error('压缩包里有过大的文件：' + name);
+      const lh = f.off;
+      const start = lh + 30 + dv.getUint16(lh + 26, true) + dv.getUint16(lh + 28, true);
+      const data = u8.subarray(start, start + f.csize);
+      if (f.method === 0) return data.slice();
+      if (f.method !== 8) throw new Error('不支持的压缩方式');
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+  };
+}
+
+function parseMarkup(text) {
+  let doc = new DOMParser().parseFromString(text, 'application/xhtml+xml');
+  if (doc.getElementsByTagName('parsererror').length) doc = new DOMParser().parseFromString(text, 'text/html');
+  return doc;
+}
+
+const BLOCK = new Set(['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'UL', 'OL', 'BLOCKQUOTE', 'SECTION', 'ARTICLE', 'ASIDE', 'HEADER', 'FOOTER', 'NAV', 'TABLE', 'TR', 'TD', 'TH', 'THEAD', 'TBODY', 'DD', 'DT', 'DL', 'FIGURE', 'FIGCAPTION', 'PRE', 'HR', 'MAIN', 'FORM', 'BODY']);
+const SKIP = new Set(['SCRIPT', 'STYLE', 'HEAD', 'SVG', 'TITLE', 'NOSCRIPT']);
+
+function tidy(s) {
+  return s.split('\n').map((x) => x.replace(/^[ \t\r\f]+|[ \t\r\f]+$/g, '')).join('\n').replace(/^\n+|\n+$/g, '');
+}
+
+// 网页 → 段落列表。每个块级元素是一段；<br> 变成换行；连续空白合并成一个空格（网页本身就是这样显示的）
+function htmlToParas(root) {
+  const out = [];
+  let cur = '';
+  let lv = 0;
+  const flush = () => { const t = tidy(cur); if (t !== '') out.push({ t, lv }); cur = ''; };
+  const go = (n) => {
+    if (n.nodeType === 3) { cur += n.nodeValue.replace(/[ \t\r\n\f]+/g, ' '); return; }
+    if (n.nodeType !== 1) return;
+    const tag = n.localName.toUpperCase();
+    if (SKIP.has(tag)) return;
+    if (tag === 'BR') { cur += '\n'; return; }
+    const hm = /^H([1-6])$/.exec(tag);
+    const block = BLOCK.has(tag);
+    if (block) flush();
+    const prev = lv;
+    if (hm) lv = +hm[1];
+    for (const c of n.childNodes) go(c);
+    if (block) flush();
+    if (hm) lv = prev;
+  };
+  go(root);
+  flush();
+  return out;
+}
+
+function autoLevel(counts) {
+  for (const L of [1, 2, 3]) if ((counts[L] || 0) >= 2) return L;
+  return 0;
+}
+function parasLevelCounts(paras) {
+  const c = {};
+  paras.forEach((p) => { if (p.lv) c[p.lv] = (c[p.lv] || 0) + 1; });
+  return c;
+}
+
+function splitParas(paras, level, fallback) {
+  const chs = [];
+  let cur = null;
+  for (const p of paras) {
+    if (level && p.lv === level) { cur = { title: p.t.replace(/\n+/g, ' '), paras: [] }; chs.push(cur); }
+    else {
+      if (!cur) { cur = { title: fallback, paras: [] }; chs.push(cur); }
+      cur.paras.push(p.t);
+    }
+  }
+  return chs.map((c) => ({ title: c.title, content: c.paras.join('\n\n') })).filter((c) => c.content.trim() !== '');
+}
+
+const MD_HEAD = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
+function mdLevelCounts(text) {
+  const c = {};
+  text.split(/\r?\n/).forEach((l) => { const m = MD_HEAD.exec(l); if (m) c[m[1].length] = (c[m[1].length] || 0) + 1; });
+  return c;
+}
+function splitMd(text, level, fallback) {
+  const chs = [];
+  let cur = null;
+  for (const line of text.split(/\r?\n/)) {
+    const m = MD_HEAD.exec(line);
+    if (level && m && m[1].length === level) { cur = { title: m[2], lines: [] }; chs.push(cur); }
+    else {
+      if (!cur) { cur = { title: fallback, lines: [] }; chs.push(cur); }
+      cur.lines.push(line);
+    }
+  }
+  return chs.map((c) => ({ title: c.title, content: c.lines.join('\n').replace(/^\n+|\n+$/g, '') })).filter((c) => c.content.trim() !== '');
+}
+
+const baseName = (n) => n.replace(/\.[^.]+$/, '');
+const dirOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '');
+const resolvePath = (base, rel) => {
+  try { return decodeURIComponent(new URL(rel, 'http://h/' + base).pathname.slice(1)); } catch (e) { return rel; }
+};
+const oneLine = (s) => s.replace(/\s+/g, ' ').trim();
+
+async function convertEpub(file) {
+  const zip = await unzip(await file.arrayBuffer());
+  const rd = async (path) => { const b = await zip.read(path); return b ? decodeStrict(b) : null; };
+  const container = await rd('META-INF/container.xml');
+  if (!container) throw new Error('不是有效的 EPUB（缺少 container.xml）');
+  const root = new DOMParser().parseFromString(container, 'application/xml').getElementsByTagName('rootfile')[0];
+  const opfPath = root && root.getAttribute('full-path');
+  const opfText = opfPath && await rd(opfPath);
+  if (!opfText) throw new Error('不是有效的 EPUB（找不到内容清单）');
+  const opf = new DOMParser().parseFromString(opfText, 'application/xml');
+  const dir = dirOf(opfPath);
+  const manifest = new Map();
+  for (const it of opf.getElementsByTagName('item')) {
+    manifest.set(it.getAttribute('id'), { href: resolvePath(dir, it.getAttribute('href') || ''), type: it.getAttribute('media-type') || '', props: it.getAttribute('properties') || '' });
+  }
+  const spine = [...opf.getElementsByTagName('itemref')].map((r) => manifest.get(r.getAttribute('idref'))).filter(Boolean);
+
+  // 目录：优先 nav.xhtml，其次 toc.ncx
+  const toc = new Map();
+  const navItem = [...manifest.values()].find((m) => /\bnav\b/.test(m.props));
+  if (navItem) {
+    const t = await rd(navItem.href);
+    if (t) {
+      const doc = new DOMParser().parseFromString(t, 'text/html');
+      const navs = [...doc.querySelectorAll('nav')];
+      const nav = navs.find((n) => (n.getAttribute('epub:type') || '') === 'toc') || navs[0];
+      if (nav) for (const a of nav.querySelectorAll('a')) {
+        const href = a.getAttribute('href');
+        const label = oneLine(a.textContent || '');
+        if (!href || !label) continue;
+        const path = resolvePath(dirOf(navItem.href), href.split('#')[0]);
+        if (!toc.has(path)) toc.set(path, label);
+      }
+    }
+  }
+  if (!toc.size) {
+    const ncx = [...manifest.values()].find((m) => m.type === 'application/x-dtbncx+xml');
+    const t = ncx && await rd(ncx.href);
+    if (t) {
+      const doc = new DOMParser().parseFromString(t, 'application/xml');
+      for (const np of doc.getElementsByTagName('navPoint')) {
+        const tx = np.getElementsByTagName('text')[0];
+        const ct = np.getElementsByTagName('content')[0];
+        const label = tx ? oneLine(tx.textContent || '') : '';
+        const src = ct && ct.getAttribute('src');
+        if (!label || !src) continue;
+        const path = resolvePath(dirOf(ncx.href), src.split('#')[0]);
+        if (!toc.has(path)) toc.set(path, label);
+      }
+    }
+  }
+
+  const items = [];
+  let k = 0;
+  for (const m of spine) {
+    if (!/html/.test(m.type)) continue;
+    const text = await rd(m.href);
+    if (!text) continue;
+    const doc = parseMarkup(text);
+    const body = doc.getElementsByTagName('body')[0] || doc.documentElement;
+    const paras = htmlToParas(body);
+    if (!paras.length) continue;
+    k++;
+    let title = toc.get(m.href);
+    if (!title) { const hd = paras.slice(0, 3).find((p) => p.lv >= 1 && p.lv <= 3); title = hd ? oneLine(hd.t) : baseName(m.href.split('/').pop()); }
+    if (paras[0].lv > 0 && oneLine(paras[0].t) === title) paras.shift();
+    const content = paras.map((p) => p.t).join('\n\n');
+    if (content.trim() === '') continue;
+    items.push({ title, content });
+  }
+  if (!items.length) throw new Error('EPUB 里没有找到文字内容');
+  return items;
+}
+
+async function convertDocx(file) {
+  const zip = await unzip(await file.arrayBuffer());
+  const docXml = zip.has('word/document.xml') ? decodeStrict(await zip.read('word/document.xml')) : null;
+  if (!docXml) throw new Error('不是有效的 DOCX 文件');
+  const styleLv = new Map();
+  if (zip.has('word/styles.xml')) {
+    const sdoc = new DOMParser().parseFromString(decodeStrict(await zip.read('word/styles.xml')), 'application/xml');
+    for (const st of sdoc.getElementsByTagName('w:style')) {
+      const id = st.getAttribute('w:styleId');
+      const nm = st.getElementsByTagName('w:name')[0];
+      const name = nm ? (nm.getAttribute('w:val') || '') : '';
+      let lv = 0;
+      const m = /^(?:heading|标题)\s*([1-9])$/i.exec(name);
+      if (m) lv = +m[1];
+      else { const ol = st.getElementsByTagName('w:outlineLvl')[0]; if (ol) lv = (+ol.getAttribute('w:val')) + 1; }
+      if (id && lv) styleLv.set(id, lv);
+    }
+  }
+  const doc = new DOMParser().parseFromString(docXml, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('DOCX 内容无法解析');
+  const paras = [];
+  for (const p of doc.getElementsByTagName('w:p')) {
+    let s = '';
+    const walk = (n) => {
+      for (const c of n.childNodes) {
+        if (c.nodeType !== 1) continue;
+        const nm = c.nodeName;
+        if (nm === 'w:t') s += c.textContent;
+        else if (nm === 'w:tab') s += '\t';
+        else if (nm === 'w:noBreakHyphen') s += '-';
+        else if (nm === 'w:br') { if (c.getAttribute('w:type') !== 'page') s += '\n'; }
+        else if (nm === 'w:delText' || nm === 'w:instrText') continue;
+        else walk(c);
+      }
+    };
+    walk(p);
+    const t = tidy(s);
+    if (t === '') continue;
+    const ps = p.getElementsByTagName('w:pStyle')[0];
+    let lv = ps ? (styleLv.get(ps.getAttribute('w:val')) || 0) : 0;
+    if (!lv) { const ol = p.getElementsByTagName('w:outlineLvl')[0]; if (ol) lv = (+ol.getAttribute('w:val')) + 1; }
+    paras.push({ t, lv: lv > 6 ? 0 : lv });
+  }
+  if (!paras.length) throw new Error('Word 文件里没有找到文字');
+  return paras;
+}
+
+async function readText(file) {
+  return decodeStrict(new Uint8Array(await file.arrayBuffer()));
+}
+
 async function viewUpload(box) {
   let cats = [];
   try { cats = (await api('categories')).categories; } catch (e) { box.append(h('p', { class: 'err' }, e.message)); return; }
@@ -269,7 +531,8 @@ async function viewUpload(box) {
     feat: h('input', { type: 'checkbox' }),
     pub: h('input', { type: 'checkbox', checked: true }),
     rep: h('input', { type: 'checkbox' }),
-    files: h('input', { type: 'file', multiple: true, accept: '.txt,text/plain' })
+    files: h('input', { type: 'file', multiple: true, accept: '.txt,.epub,.docx,.html,.htm,.md,.markdown' }),
+    level: h('select', {}, [['auto', '自动'], ['1', '一级标题'], ['2', '二级标题'], ['3', '三级标题'], ['0', '不分章（整本一章）']].map(([v, l]) => h('option', { value: v }, l)))
   };
   const fillScripts = () => {
     f.script.replaceChildren(...SCRIPTS_BY_LANG[f.lang.value].map((s) => h('option', { value: s }, SCRIPT[s])));
@@ -279,18 +542,75 @@ async function viewUpload(box) {
   f.script.addEventListener('change', () => { f.dir.value = f.script.value === 'arabic' ? 'rtl' : 'ltr'; });
   fillScripts();
 
-  let chapters = [];
+  let mode = 'none'; // none | txt | conv
+  let chapters = []; // txt 模式
+  let conv = null; // conv 模式：{ kind, paras|text, fallback, items }
   const preview = h('div');
+  const levelBox = h('div', { style: 'display:none' }, h('label', {}, '按几级标题分章'), f.level);
   const log = h('div');
   const go = h('button', {}, '开始上传');
 
-  f.files.addEventListener('change', async () => {
-    chapters = [];
-    preview.replaceChildren(h('p', { class: 'muted' }, '检查文件中…'));
-    const files = [...f.files].sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
+  function setItems(list) {
+    conv.items = list.map((c) => ({ inc: true, title: c.title, content: c.content, bytes: new TextEncoder().encode(c.content).length }));
+    renderConv();
+  }
+
+  function applySplit() {
+    const v = f.level.value;
+    if (conv.kind === 'paras') {
+      const L = v === 'auto' ? autoLevel(parasLevelCounts(conv.paras)) : +v;
+      setItems(splitParas(conv.paras, L, conv.fallback));
+    } else if (conv.kind === 'md') {
+      const L = v === 'auto' ? autoLevel(mdLevelCounts(conv.text)) : +v;
+      setItems(splitMd(conv.text, L, conv.fallback));
+    }
+  }
+  f.level.addEventListener('change', () => { if (conv) applySplit(); });
+
+  function renderConv() {
+    const summary = h('p', { class: 'ok' });
+    const upd = () => {
+      const n = conv.items.filter((x) => x.inc).length;
+      summary.textContent = '转换完成：共 ' + conv.items.length + ' 章，已选 ' + n + ' 章。请检查标题和内容，不需要的取消勾选（封面、目录、版权页等）';
+    };
+    upd();
+    const rows = conv.items.map((it, i) => {
+      const cb = h('input', { type: 'checkbox', checked: it.inc });
+      cb.addEventListener('change', () => { it.inc = cb.checked; upd(); });
+      const ti = h('input', { dir: 'auto', value: it.title });
+      ti.addEventListener('input', () => { it.title = ti.value; });
+      const tooBig = it.bytes > MAXCH;
+      return h('div', { class: 'convrow' },
+        h('label', { class: 'chk' }, cb, '#' + (i + 1) + '　' + Math.round(it.bytes / 1024) + ' KB'),
+        ti,
+        h('div', { class: 'muted', dir: 'auto' }, oneLine(it.content.slice(0, 80)) + '…'),
+        tooBig ? h('div', { class: 'err' }, '这一章超过 3.5MB，请取消勾选或换分章方式') : null);
+    });
+    preview.replaceChildren(summary, ...rows);
+  }
+
+  async function collectConv() {
+    const sel = conv.items.filter((x) => x.inc);
+    if (!sel.length) throw new Error('没有选中任何章节');
+    const out = [];
+    let n = 0;
+    for (const it of sel) {
+      n++;
+      if (!it.title.trim()) throw new Error('第 ' + n + ' 章标题为空');
+      if (it.title.includes('\uFFFD') || it.content.includes('\uFFFD') || it.content.includes('\u0000')) throw new Error('第 ' + n + ' 章含有乱码或空字符，已停止');
+      if (it.bytes > MAXCH) throw new Error('第 ' + n + ' 章超过 3.5MB');
+      out.push({ n, title: it.title, content: it.content, sha: await sha256(it.content), bytes: it.bytes });
+    }
+    return out;
+  }
+
+  async function handleTxt(files) {
+    mode = 'txt'; conv = null; chapters = [];
+    levelBox.style.display = 'none';
+    const sorted = files.sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
     const items = [];
     let anyBad = false;
-    for (const file of files) {
+    for (const file of sorted) {
       try {
         const c = await parseChapter(file);
         if (c.bytes > MAXCH) throw new Error('单章超过 3.5MB，请拆分');
@@ -309,6 +629,53 @@ async function viewUpload(box) {
     preview.replaceChildren(
       h('p', { class: anyBad ? 'err' : 'ok' }, anyBad ? '有文件不合格，修好后重新选择（不会自动修复）' : '✓ 检查通过，共 ' + chapters.length + ' 章'),
       h('ul', { class: 'ch' }, items));
+  }
+
+  async function handleOne(file, ext) {
+    mode = 'conv'; chapters = [];
+    const fb = baseName(file.name);
+    if (ext === 'epub') {
+      levelBox.style.display = 'none';
+      conv = { kind: 'fixed', items: [] };
+      setItems(await convertEpub(file));
+    } else if (ext === 'docx') {
+      levelBox.style.display = '';
+      f.level.value = 'auto';
+      conv = { kind: 'paras', paras: await convertDocx(file), fallback: fb, items: [] };
+      applySplit();
+    } else if (ext === 'md' || ext === 'markdown') {
+      levelBox.style.display = '';
+      f.level.value = 'auto';
+      conv = { kind: 'md', text: await readText(file), fallback: fb, items: [] };
+      applySplit();
+    } else { // html
+      levelBox.style.display = '';
+      f.level.value = 'auto';
+      const doc = parseMarkup(await readText(file));
+      conv = { kind: 'paras', paras: htmlToParas(doc.getElementsByTagName('body')[0] || doc.documentElement), fallback: fb, items: [] };
+      applySplit();
+    }
+    if (!conv.items.length) throw new Error('没有转换出任何章节');
+  }
+
+  f.files.addEventListener('change', async () => {
+    mode = 'none'; chapters = []; conv = null;
+    levelBox.style.display = 'none';
+    const files = [...f.files.files];
+    if (!files.length) { preview.replaceChildren(); return; }
+    preview.replaceChildren(h('p', { class: 'muted' }, '检查 / 转换文件中…'));
+    const exts = files.map((x) => (x.name.split('.').pop() || '').toLowerCase());
+    try {
+      if (files.some((x) => x.size > MAX_FILE)) throw new Error('文件超过 60MB');
+      if (exts.every((e) => e === 'txt')) await handleTxt(files);
+      else if (files.length === 1 && ['epub', 'docx', 'html', 'htm', 'md', 'markdown'].includes(exts[0])) await handleOne(files[0], exts[0]);
+      else if (exts.includes('doc') || exts.includes('pdf')) throw new Error('暂不支持 .doc 和 PDF。Word 请另存为 .docx');
+      else throw new Error('一次只能选一个 EPUB / Word(.docx) / HTML / Markdown 文件；或者选多个 .txt 章节文件');
+    } catch (e) {
+      mode = 'none'; conv = null; chapters = [];
+      levelBox.style.display = 'none';
+      preview.replaceChildren(h('p', { class: 'err' }, e.message));
+    }
   });
 
   go.addEventListener('click', async () => {
@@ -321,15 +688,16 @@ async function viewUpload(box) {
     };
     if (!meta.title.trim() || !meta.author.trim()) return say('请填写书名和作者', 'err');
     if (!meta.copyright_note.trim()) return say('请填写版权来源', 'err');
-    if (!chapters.length) return say('请先选择合格的章节文件', 'err');
+    if (mode === 'none' || (mode === 'txt' && !chapters.length) || (mode === 'conv' && !conv.items.some((x) => x.inc))) return say('请先选择合格的章节文件', 'err');
     go.disabled = true;
     let bookId = null;
     try {
+      const list = mode === 'txt' ? chapters : await collectConv();
       say('创建草稿…');
       bookId = (await api('create_book', { meta, replace: f.rep.checked })).id;
       // 分批上传
       const batches = []; let cur = []; let size = 0;
-      for (const c of chapters) {
+      for (const c of list) {
         if (cur.length && size + c.bytes > BATCH) { batches.push(cur); cur = []; size = 0; }
         cur.push(c); size += c.bytes;
       }
@@ -338,19 +706,19 @@ async function viewUpload(box) {
       for (const b of batches) {
         await api('add_chapters', { book_id: bookId, chapters: b.map((c) => ({ n: c.n, title: c.title, content: c.content, sha: c.sha })) });
         done += b.length;
-        say('已上传 ' + done + ' / ' + chapters.length + ' 章');
+        say('已上传 ' + done + ' / ' + list.length + ' 章');
       }
       say('逐章校验中…');
       const r = await api('finalize', {
         book_id: bookId, publish: f.pub.checked,
         book: { title: meta.title, author: meta.author, description: meta.description || null },
-        expected: chapters.map((c) => ({ n: c.n, title: c.title, sha: c.sha }))
+        expected: list.map((c) => ({ n: c.n, title: c.title, sha: c.sha }))
       });
       if (!r.ok) {
         say('✗ 校验失败，这本书保持草稿，读者看不到：', 'err');
         r.problems.forEach((p) => say('- ' + p, 'err'));
       } else {
-        say('✓ 校验通过：全部章节与原文一致' + (r.published ? '，已上架' : '，保持草稿（可在书籍管理里上架）'), 'ok');
+        say('✓ 校验通过：数据库里的内容与上传的完全一致' + (r.published ? '，已上架' : '，保持草稿（可在书籍管理里上架）'), 'ok');
       }
     } catch (e) {
       say('✗ ' + e.message, 'err');
@@ -370,7 +738,8 @@ async function viewUpload(box) {
     h('label', { class: 'chk' }, f.feat, '设为推荐'),
     h('label', { class: 'chk' }, f.pub, '校验通过后立即上架'),
     h('label', { class: 'chk' }, f.rep, '覆盖已有的同一本书（同名同作者）'),
-    field('章节文件（.txt，可多选；文件名 001.txt、002.txt…；第 1 行标题，第 2 行空行，第 3 行起正文）', f.files),
+    field('书的文件：多个 .txt 章节文件（001.txt、002.txt…，第 1 行标题，第 2 行空行，第 3 行起正文），或者一个 EPUB / Word(.docx) / HTML / Markdown 文件', f.files),
+    levelBox,
     preview,
     h('div', { class: 'row' }, go),
     log));
