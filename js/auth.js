@@ -69,9 +69,9 @@ async function token() {
     method: 'POST', headers: { apikey: ANON_KEY, 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh_token: s.refresh_token })
   });
-  if (!r.ok) { localStorage.removeItem(SESS); return null; }
+  if (!r.ok) { localStorage.removeItem(SESS); notify(); return null; }
   const j = await r.json();
-  s = { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: j.expires_at || (Math.floor(Date.now() / 1000) + j.expires_in), email: (j.user && j.user.email) || s.email, uid: (j.user && j.user.id) || s.uid };
+  s = { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: j.expires_at || (Math.floor(Date.now() / 1000) + j.expires_in), email: (j.user && j.user.email) || s.email, uid: (j.user && j.user.id) || s.uid, name: ((j.user && j.user.user_metadata && j.user.user_metadata.full_name) || s.name || ''), picture: ((j.user && j.user.user_metadata && j.user.user_metadata.avatar_url) || s.picture || '') };
   jset(SESS, s);
   return s.access_token;
 }
@@ -122,45 +122,27 @@ export async function sync(allowReload) {
   } finally { busy = false; }
 }
 
-// ---------- 界面 ----------
-function ui() {
-  const box = document.createElement('div');
-  box.style.cssText = 'position:fixed;top:8px;right:8px;z-index:50;font:14px system-ui,sans-serif';
-  const chip = document.createElement('button');
-  chip.style.cssText = 'min-height:36px;min-width:36px;padding:0 12px;border:1px solid rgba(128,128,128,.4);border-radius:18px;background:rgba(255,255,255,.92);color:#1c2024;cursor:pointer;font:inherit';
-  const menu = document.createElement('div');
-  menu.style.cssText = 'display:none;margin-top:6px;padding:10px;border-radius:12px;background:#fff;color:#1c2024;border:1px solid #ddd;box-shadow:0 4px 16px rgba(0,0,0,.15);min-width:200px';
-  box.append(chip, menu);
-  const btn = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = 'display:block;width:100%;min-height:44px;margin:4px 0;border:0;border-radius:8px;background:#0e7c6b;color:#fff;font:inherit;cursor:pointer'; b.addEventListener('click', fn); return b; };
-  const draw = () => {
-    const s = getSess(); const t = tr();
-    chip.textContent = s ? '● ' + (s.email || t.title).split('@')[0].slice(0, 12) : '👤';
-    chip.setAttribute('aria-label', t.title);
-    menu.replaceChildren();
-    const msg = document.createElement('div'); msg.style.cssText = 'font-size:13px;margin-top:4px;color:#5d6670;word-break:break-all';
-    if (!s) menu.append(btn(t.login, login));
-    else {
-      const em = document.createElement('div'); em.textContent = s.email || ''; em.style.cssText = 'font-size:13px;color:#5d6670;word-break:break-all'; menu.append(em);
-      menu.append(btn(t.sync, async () => { msg.textContent = '…'; try { const r = await sync(false); msg.textContent = r === 'ok' ? t.ok : r; } catch (e) { msg.textContent = t.fail + e.message; } }));
-      menu.append(btn(t.out, () => { localStorage.removeItem(SESS); localStorage.removeItem(META); draw(); }));
-    }
-    menu.append(msg);
-  };
-  chip.addEventListener('click', () => { menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; if (menu.style.display === 'block') draw(); });
-  const vis = () => { box.style.display = /read/i.test(location.hash) ? 'none' : ''; };
-  addEventListener('hashchange', vis); vis();
-  draw();
-  document.body.append(box);
+// ---------- 对外接口 ----------
+const listeners = [];
+export const onAuth = (cb) => { listeners.push(cb); };
+const notify = () => listeners.forEach((cb) => { try { cb(); } catch (e) { /* ignore */ } });
+export const getSession = () => getSess();
+export const isLoggedIn = () => !!getSess();
+export function takeAuthError() {
+  try { const e = sessionStorage.getItem('kitap:autherr'); sessionStorage.removeItem('kitap:autherr'); return e; } catch (e) { return null; }
 }
-
-function login() {
+export function login() {
   const redirect = location.origin + '/auth.html';
   location.href = SUPABASE_URL + '/auth/v1/authorize?provider=google&redirect_to=' + encodeURIComponent(redirect);
+}
+export async function signOut() {
+  try { await sync(false); } catch (e) { /* 离线也允许退出 */ }
+  localStorage.removeItem(SESS); localStorage.removeItem(META);
+  notify();
 }
 
 function start() {
   if (!SUPABASE_URL || !ANON_KEY) return;
-  ui();
   if (getSess()) {
     sync(true).catch(() => {});
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && getSess()) sync(false).catch(() => {}); });
