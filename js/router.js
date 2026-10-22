@@ -3,6 +3,7 @@ const routes = [
   { name: 'home', pattern: /^\/$/, keys: [] },
   { name: 'library', pattern: /^\/library$/, keys: [] },
   { name: 'shelf', pattern: /^\/shelf$/, keys: [] },
+  { name: 'me', pattern: /^\/me$/, keys: [] },
   { name: 'book', pattern: /^\/book\/([^/]+)$/, keys: ['id'] },
   { name: 'read', pattern: /^\/read\/([^/]+)(?:\/([^/]+))?$/, keys: ['bookId', 'chapterId'] },
   { name: 'dev', pattern: /^\/dev$/, keys: [] }
