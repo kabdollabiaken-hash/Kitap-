@@ -58,11 +58,3 @@
 .lg-btn:disabled{opacity:.6}
 .lg-err{color:#b3362b;font-size:14px;margin:14px 0 0}
 .lg-note{text-align:center;font-size:13px;opacity:.65;margin:0 auto;max-width:360px;line-height:1.5}
-@media (prefers-color-scheme:dark){
-  .lg{background:linear-gradient(165deg,#10201b 0%,#1a1813 100%);color:#e8efec}
-  .lg .me-chip{color:#e8efec;border-color:rgba(232,239,236,.3)}
-  .lg-logo{box-shadow:none}
-  .lg-brand{color:#7fc4ae}
-  .me-card,.me-cell{background:var(--card,#1d2321);border-color:var(--line,#2a332f)}
-  .me-row{border-color:var(--line,#2a332f)}
-}
