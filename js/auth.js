@@ -1,7 +1,9 @@
 // 谷歌登录 + 云端同步（书架、最近阅读、进度、阅读时长、偏好）
 // 不改动原有代码：直接读写本机存储，登录与否都不影响阅读。
-const SUPABASE_URL = 'https://把这里换成你的项目.supabase.co';
-const ANON_KEY = '把这里换成你的 anon key';
+import * as CFG from './config.js';
+const pick = (re) => { const k = Object.keys(CFG).find((x) => re.test(x)); return k ? CFG[k] : ''; };
+const SUPABASE_URL = pick(/_URL$/);
+const ANON_KEY = pick(/_KEY$/);
 
 const P = 'kitap:v1:';
 const KEYS = ['shelf', 'recent', 'progress', 'readtime', 'prefs'];
@@ -157,7 +159,7 @@ function login() {
 }
 
 function start() {
-  if (SUPABASE_URL.includes('把这里')) return;
+  if (!SUPABASE_URL || !ANON_KEY) return;
   ui();
   if (getSess()) {
     sync(true).catch(() => {});
