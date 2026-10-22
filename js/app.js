@@ -1,6 +1,7 @@
 import { t, initLang, setLang, getLang, LANGS, checkI18n, localized } from './i18n.js';
 import './messages-shelf.js';
 import './messages-home.js';
+import './messages-me.js';
 import './readtime.js';
 import { storage } from './storage.js';
 import { parseHash, onRouteChange, navigate } from './router.js';
@@ -8,8 +9,10 @@ import { listBooks, getCategories, getBook, getChapterList, langTag } from './ap
 import { getBooksByIds } from './api-extra.js';
 import { h, enc, loadInto } from './ui.js';
 import { viewReader, leaveReader } from './reader.js';
+import { viewMe, viewLogin } from './me.js';
+import { isLoggedIn, onAuth } from './auth.js';
 
-for (const href of ['./css/pages.css', './css/book.css', './css/shelf.css', './css/reader.css', './css/home.css']) {
+for (const href of ['./css/pages.css', './css/book.css', './css/shelf.css', './css/reader.css', './css/home.css', './css/me.css']) {
   document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'stylesheet', href }));
 }
 
@@ -21,7 +24,8 @@ function icon(name) {
   const paths = {
     home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
     library: '<path d="M4 5.5C4 4.7 4.7 4 5.5 4H11v16H5.5C4.7 20 4 19.3 4 18.5z"/><path d="M20 5.5C20 4.7 19.3 4 18.5 4H13v16h5.5c.8 0 1.5-.7 1.5-1.5z"/>',
-    shelf: '<path d="M6 3h12v18l-6-4-6 4z"/>'
+    shelf: '<path d="M6 3h12v18l-6-4-6 4z"/>',
+    me: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>'
   };
   const s = document.createElement('span');
   s.setAttribute('aria-hidden', 'true');
@@ -79,13 +83,15 @@ const bookGrid = (items) => h('div', { class: 'grid' }, items.map(bookCard));
 const NAV = [
   { id: 'home', href: '#/', key: 'nav.home' },
   { id: 'library', href: '#/library', key: 'nav.library' },
-  { id: 'shelf', href: '#/shelf', key: 'nav.shelf' }
+  { id: 'shelf', href: '#/shelf', key: 'nav.shelf' },
+  { id: 'me', href: '#/me', key: 'nav.me' }
 ];
 
 function activeNav() {
   if (route.name === 'home') return 'home';
   if (['library', 'book', 'read'].includes(route.name)) return 'library';
   if (route.name === 'shelf') return 'shelf';
+  if (route.name === 'me') return 'me';
   return '';
 }
 
@@ -515,6 +521,7 @@ function renderView() {
     case 'home': return viewHome();
     case 'library': return viewLibrary();
     case 'shelf': return viewShelf();
+    case 'me': return viewMe({ cover });
     case 'book': return viewBook();
     case 'dev': return viewDev();
     default: return viewNotFound();
@@ -525,6 +532,11 @@ function renderView() {
 function render(scrollTop = true) {
   leaveReader(); // 离开阅读器前先保存进度
   document.title = t('brand');
+  if (!isLoggedIn()) { // 没登录：只显示登录页
+    app.replaceChildren(viewLogin(() => render(false)));
+    window.scrollTo(0, 0);
+    return;
+  }
   if (route.name === 'read') {
     // 阅读器是全屏的，不显示网站的顶栏和底部标签
     app.replaceChildren(viewReader(route.params));
@@ -541,3 +553,4 @@ function render(scrollTop = true) {
 
 initLang();
 onRouteChange((r) => { route = r; render(true); });
+onAuth(() => render(true));
