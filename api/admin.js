@@ -38,6 +38,15 @@ async function bookStatus(id) {
   return r[0];
 }
 
+
+function checkChapterText(title, content, clientSha) {
+  if (typeof title !== 'string' || title.trim() === '') throw bad('章节标题不能为空');
+  if (typeof content !== 'string' || content.trim() === '') throw bad('正文不能为空');
+  if (content.includes('\u0000') || content.includes('\uFFFD') || title.includes('\uFFFD')) throw bad('含有乱码或空字符');
+  if (Buffer.byteLength(content, 'utf8') > MAX_BYTES) throw bad('这一章太大（超过 3.5MB），请拆分');
+  if (sha(content) !== clientSha) throw bad('正文在传输中发生变化（哈希不一致），已停止');
+}
+
 const actions = {
   async categories() {
     const rows = await db('GET', 'categories', { params: { select: 'id,slug,name', order: 'slug.asc' } });
@@ -117,6 +126,71 @@ const actions = {
     return { cover_url: url };
   },
 
+  async list_chapters({ book_id }) {
+    needId(book_id);
+    const rows = await db('GET', 'chapters', { params: { select: 'id,chapter_number,title', book_id: 'eq.' + book_id, order: 'chapter_number.asc', limit: '2000' } });
+    return { chapters: rows };
+  },
+
+  async get_chapter({ id }) {
+    needId(id);
+    const rows = await db('GET', 'chapters', { params: { select: 'id,book_id,chapter_number,title,content', id: 'eq.' + id } });
+    if (!rows.length) throw new HttpError(404, '找不到这一章');
+    return { chapter: rows[0] };
+  },
+
+  async update_chapter({ id, title, content, sha: clientSha }) {
+    needId(id);
+    checkChapterText(title, content, clientSha);
+    const h = sha(content);
+    await db('PATCH', 'chapters', { params: { id: 'eq.' + id }, body: { title, content, source_sha256: h } });
+    const back = await db('GET', 'chapters', { params: { select: 'title,content_sha256', id: 'eq.' + id } });
+    const problems = [];
+    if (!back.length) problems.push('保存后读不到这一章');
+    else {
+      if (back[0].title !== title) problems.push('标题读回后不一致');
+      if (back[0].content_sha256 !== h) problems.push('正文哈希不一致');
+    }
+    return problems.length ? { ok: false, problems } : { ok: true };
+  },
+
+  async add_chapter({ book_id, title, content, sha: clientSha }) {
+    needId(book_id);
+    await bookStatus(book_id);
+    checkChapterText(title, content, clientSha);
+    const last = await db('GET', 'chapters', { params: { select: 'chapter_number', book_id: 'eq.' + book_id, order: 'chapter_number.desc', limit: '1' } });
+    const n = last.length ? last[0].chapter_number + 1 : 1;
+    const h = sha(content);
+    const created = await db('POST', 'chapters', { prefer: 'return=representation', body: { book_id, chapter_number: n, title, content, source_sha256: h } });
+    const back = await db('GET', 'chapters', { params: { select: 'title,content_sha256', id: 'eq.' + created[0].id } });
+    const problems = [];
+    if (!back.length || back[0].title !== title) problems.push('标题读回后不一致');
+    if (!back.length || back[0].content_sha256 !== h) problems.push('正文哈希不一致');
+    return problems.length ? { ok: false, problems } : { ok: true, id: created[0].id, n };
+  },
+
+  async delete_chapter({ id }) {
+    needId(id);
+    const rows = await db('GET', 'chapters', { params: { select: 'book_id', id: 'eq.' + id } });
+    if (!rows.length) throw new HttpError(404, '找不到这一章');
+    const all = await db('GET', 'chapters', { params: { select: 'id', book_id: 'eq.' + rows[0].book_id, limit: '2' } });
+    if (all.length < 2) throw bad('这是最后一章，不能删除。要删整本书请用“删除”');
+    await db('DELETE', 'chapters', { params: { id: 'eq.' + id } });
+    return { ok: true };
+  },
+
+  // 把章节编号整理成 1、2、3…（保持原来的顺序）
+  async renumber({ book_id }) {
+    needId(book_id);
+    const rows = await db('GET', 'chapters', { params: { select: 'id,chapter_number', book_id: 'eq.' + book_id, order: 'chapter_number.asc', limit: '2000' } });
+    const todo = rows.map((r, i) => ({ id: r.id, from: r.chapter_number, to: i + 1 })).filter((r) => r.from !== r.to);
+    const par = async (list, fn) => { for (let i = 0; i < list.length; i += 10) await Promise.all(list.slice(i, i + 10).map(fn)); };
+    // 先挪到一个不会冲突的区间，再写最终编号
+    await par(todo, (r) => db('PATCH', 'chapters', { params: { id: 'eq.' + r.id }, body: { chapter_number: r.to + 1000000 } }));
+    await par(todo, (r) => db('PATCH', 'chapters', { params: { id: 'eq.' + r.id }, body: { chapter_number: r.to } }));
+    return { ok: true, changed: todo.length };
+  },
+
   async set_featured({ id, value }) {
     needId(id);
     await db('PATCH', 'books', { params: { id: 'eq.' + id }, body: { is_featured: value === true } });
@@ -187,7 +261,7 @@ const actions = {
       if (!Number.isInteger(c.n) || c.n < 1) throw bad('章节编号不正确');
       if (typeof c.title !== 'string' || c.title.trim() === '') throw bad('第 ' + c.n + ' 章标题为空');
       if (typeof c.content !== 'string' || c.content.trim() === '') throw bad('第 ' + c.n + ' 章正文为空');
-      if (c.content.includes('\u0000') || c.content.includes('\uFFFD') || c.title.includes('\uFFFD')) throw bad('第 ' + c.n + ' 章含有乱码或空字符');
+      if (c.content.includes('\u0000') || c.content.includes('�') || c.title.includes('�')) throw bad('第 ' + c.n + ' 章含有乱码或空字符');
       const h = sha(c.content);
       if (h !== c.sha) throw bad('第 ' + c.n + ' 章在传输中发生变化（哈希不一致），已停止');
       total += Buffer.byteLength(c.content, 'utf8');
