@@ -7,6 +7,7 @@ import { storage } from './storage.js';
 import { getBook, getChapterList, langTag, isUuid } from './api.js';
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { h, enc } from './ui.js';
+import { createAudio } from './audio.js';
 
 if (!document.querySelector('link[data-paging]')) {
   const l = document.createElement('link');
@@ -33,11 +34,15 @@ export function leaveReader() {
 
 async function getChapter(bookId, chapterId) {
   const url = new URL(SUPABASE_URL + '/rest/v1/chapters');
-  url.searchParams.set('select', 'id,book_id,chapter_number,title,content,content_sha256,language,script,text_direction');
+  url.searchParams.set('select', 'id,book_id,chapter_number,title,content,content_sha256,language,script,text_direction,audio_path,audio_seconds');
   url.searchParams.set('id', 'eq.' + chapterId);
   url.searchParams.set('book_id', 'eq.' + bookId);
   url.searchParams.set('limit', '1');
-  const r = await fetch(url, { headers: { apikey: SUPABASE_KEY } });
+  let r = await fetch(url, { headers: { apikey: SUPABASE_KEY } });
+  if (!r.ok) { // 数据库还没加音频字段时，退回不带音频的查询
+    url.searchParams.set('select', 'id,book_id,chapter_number,title,content,content_sha256,language,script,text_direction');
+    r = await fetch(url, { headers: { apikey: SUPABASE_KEY } });
+  }
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const rows = await r.json();
   return rows[0] || null;
@@ -74,6 +79,27 @@ function countPages(flow, W, rtl) {
   return max + 1;
 }
 
+// ---------- 仿真翻页的几何：沿折痕把页面分成两块 ----------
+// 保留 (X-M)·n 同号（sign=1 取 >=0，sign=-1 取 <=0）的那一半
+function clipPoly(poly, M, n, sign) {
+  const out = [];
+  const f = (p) => ((p.x - M.x) * n.x + (p.y - M.y) * n.y) * sign;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const fa = f(a);
+    const fb = f(b);
+    if (fa >= 0) out.push(a);
+    if ((fa >= 0) !== (fb >= 0)) {
+      const k = fa / (fa - fb);
+      out.push({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k });
+    }
+  }
+  return out;
+}
+const polyCss = (poly) => (poly.length < 3 ? 'polygon(0 0,0 0,0 0)'
+  : 'polygon(' + poly.map((p) => p.x.toFixed(1) + 'px ' + p.y.toFixed(1) + 'px').join(',') + ')');
+
 // ---------- 翻页引擎 ----------
 function createPager(o) {
   const { stage, A, B, num, W, rtl, mode } = o;
@@ -85,6 +111,14 @@ function createPager(o) {
   let raf = 0;
   let drag = null;
 
+  // 仿真翻页用到的三个元素：翻起来的纸背面、折痕处的阴影
+  const flap = h('div', { class: 'pg-flap' });
+  const flapWrap = h('div', { class: 'pg-flapwrap' }, flap);
+  const sdw = h('div', { class: 'pg-sdw' });
+  const usd = h('div', { class: 'pg-usd' });
+  if (mode === 'curl') stage.append(usd, sdw, flapWrap);
+  const hideCurl = () => { flapWrap.style.display = 'none'; sdw.style.display = 'none'; usd.style.display = 'none'; };
+
   A.flow.style.transform = 'none';
   const pages = countPages(A.flow, W, rtl);
   cur = o.atLast ? pages - 1 : Math.min(pages - 1, Math.max(0, Math.round(o.ratio * (pages - 1))));
@@ -93,6 +127,9 @@ function createPager(o) {
   const rest = () => {
     place(A, cur);
     A.layer.style.transform = '';
+    A.layer.style.clipPath = '';
+    B.layer.style.clipPath = '';
+    hideCurl();
     A.layer.style.zIndex = '2';
     A.shade.style.opacity = '0';
     B.layer.style.visibility = 'hidden';
@@ -102,12 +139,56 @@ function createPager(o) {
   };
 
   // top：正在翻的那一层；t：翻开的程度 0（盖住）~1（翻走）
-  const apply = (top, under, tt) => {
+  const curl = (top, under, tt, s) => {
+    const SW = stage.clientWidth;
+    const SH = stage.clientHeight;
+    if (tt <= 0.003) { top.layer.style.clipPath = ''; hideCurl(); return; }
+    const right = s.side === 'right';
+    const bottom = s.vert !== 'top';
+    const C = { x: right ? SW : 0, y: bottom ? SH : 0 };
+    const k = Math.min(1, tt);
+    // 手指（卷角的尖）的位置：横向走过整个页面，纵向先抬起再落下，折痕因此是斜的
+    const P = { x: C.x + (right ? -1 : 1) * 2.06 * SW * k, y: C.y + (bottom ? -1 : 1) * 0.30 * SH * Math.sin(Math.PI * k) };
+    const dx = P.x - C.x;
+    const dy = P.y - C.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const n = { x: dx / len, y: dy / len };
+    const M = { x: (C.x + P.x) / 2, y: (C.y + P.y) / 2 };
+    const rect = [{ x: 0, y: 0 }, { x: SW, y: 0 }, { x: SW, y: SH }, { x: 0, y: SH }];
+    const flat = clipPoly(rect, M, n, 1); // 还平躺着的那部分
+    const cs = clipPoly(rect, M, n, -1); // 被卷起来的那部分（含翻角）
+    top.layer.style.clipPath = polyCss(flat);
+
+    const L = Math.abs(SW * n.x) + Math.abs(SH * n.y); // 渐变线长度
+    const grad = (dirx, diry, stops) => { // 方向 (dirx,diry)，从折痕出发
+      const theta = Math.atan2(dirx, -diry);
+      const tc = (SW / 2 - M.x) * dirx + (SH / 2 - M.y) * diry;
+      const s0 = L / 2 - tc;
+      return 'linear-gradient(' + (theta * 180 / Math.PI).toFixed(2) + 'deg,' + stops.map(([c, d]) => c + ' ' + (s0 + d).toFixed(1) + 'px').join(',') + ')';
+    };
+
+    if (cs.length >= 3) {
+      flapWrap.style.display = 'block';
+      const dot = M.x * n.x + M.y * n.y;
+      flap.style.clipPath = polyCss(cs);
+      flap.style.transform = 'matrix(' + [1 - 2 * n.x * n.x, -2 * n.x * n.y, -2 * n.x * n.y, 1 - 2 * n.y * n.y, 2 * dot * n.x, 2 * dot * n.y].map((v) => v.toFixed(5)).join(',') + ')';
+      // 纸背面：折痕处最深，往外渐渐变亮
+      flap.style.backgroundImage = grad(-n.x, -n.y, [['rgba(0,0,0,.34)', 0], ['rgba(0,0,0,.10)', 34], ['rgba(255,255,255,.10)', 150], ['rgba(0,0,0,.04)', 400]]);
+      usd.style.display = 'block';
+      usd.style.clipPath = polyCss(cs);
+      usd.style.backgroundImage = grad(-n.x, -n.y, [['rgba(0,0,0,.30)', 0], ['rgba(0,0,0,0)', 70]]);
+    } else { flapWrap.style.display = 'none'; usd.style.display = 'none'; }
+    if (flat.length >= 3) {
+      sdw.style.display = 'block';
+      sdw.style.clipPath = polyCss(flat);
+      sdw.style.backgroundImage = grad(n.x, n.y, [['rgba(0,0,0,.26)', 0], ['rgba(0,0,0,0)', 90]]);
+    } else sdw.style.display = 'none';
+    top.shade.style.opacity = '0';
+    under.shade.style.opacity = '0';
+  };
+  const apply = (top, under, tt, s) => {
     if (mode === 'curl') {
-      top.layer.style.transformOrigin = rtl ? '100% 50%' : '0% 50%';
-      top.layer.style.transform = 'rotateY(' + ((rtl ? 1 : -1) * tt * 96) + 'deg)';
-      top.shade.style.opacity = String(Math.min(0.55, tt * 0.6));
-      under.shade.style.opacity = String((1 - tt) * 0.35);
+      curl(top, under, tt, s);
     } else {
       top.layer.style.transform = 'translateX(' + ((rtl ? 1 : -1) * tt * 100) + '%)';
       top.shade.style.opacity = '0';
@@ -115,7 +196,7 @@ function createPager(o) {
     }
   };
 
-  const begin = (fwd) => {
+  const begin = (fwd, vert) => {
     const target = cur + (fwd ? 1 : -1);
     if (target < 0 || target >= pages) return null;
     const top = fwd ? A : B;
@@ -124,9 +205,9 @@ function createPager(o) {
     B.layer.style.visibility = 'visible';
     top.layer.style.zIndex = '3';
     under.layer.style.zIndex = '1';
-    return { fwd, target, top, under };
+    return { fwd, target, top, under, vert: vert || 'bottom', side: (fwd === !rtl) ? 'right' : 'left' };
   };
-  const setP = (s, p) => apply(s.top, s.under, s.fwd ? p : 1 - p);
+  const setP = (s, p) => apply(s.top, s.under, s.fwd ? p : 1 - p, s);
   const finish = (s, done) => {
     if (done) cur = s.target;
     rest();
@@ -145,9 +226,9 @@ function createPager(o) {
     };
     raf = requestAnimationFrame(step);
   };
-  const flip = (fwd) => {
+  const flip = (fwd, vert) => {
     if (busy || drag) return;
-    const s = begin(fwd);
+    const s = begin(fwd, vert);
     if (!s) { o.onEdge(fwd); return; }
     busy = true;
     setP(s, 0);
@@ -155,11 +236,15 @@ function createPager(o) {
   };
 
   // ---- 手势：轻点（左侧上一页，其余下一页；从右往左的书相反）和拖动翻页 ----
-  const tap = (x) => {
+  const vertOf = (y) => {
+    const r = stage.getBoundingClientRect();
+    return y - r.top < r.height / 2 ? 'top' : 'bottom';
+  };
+  const tap = (x, y) => {
     const r = stage.getBoundingClientRect();
     const f = (x - r.left) / r.width;
     const back = rtl ? f > 0.7 : f < 0.3;
-    flip(!back);
+    flip(!back, vertOf(y));
   };
   const forwardDx = (dx) => (rtl ? dx : -dx);
   stage.addEventListener('pointerdown', (e) => {
@@ -175,7 +260,7 @@ function createPager(o) {
       if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
         drag.mode = 1;
         drag.fwd = forwardDx(dx) > 0;
-        drag.s = begin(drag.fwd);
+        drag.s = begin(drag.fwd, vertOf(drag.y));
       } else if (Math.abs(dy) > 10) { drag.mode = -1; return; } else return;
     }
     if (drag.mode !== 1) return;
@@ -187,7 +272,7 @@ function createPager(o) {
     const d = drag;
     drag = null;
     if (!d) return;
-    if (d.mode === 0) { if (!cancelled) tap(e.clientX); return; }
+    if (d.mode === 0) { if (!cancelled) tap(e.clientX, e.clientY); return; }
     if (d.mode !== 1) return;
     if (!d.s) { if (!cancelled && d.p > 0.25) o.onEdge(d.fwd); return; }
     const v = (d.p * W * 0.85) / Math.max(1, performance.now() - d.t);
@@ -227,6 +312,7 @@ export function viewReader(params) {
   let timer = null;
   let saveNow = null;
   let pager = null;
+  let audioCtl = null;
   const listeners = [];
   const listen = (tg, ev, fn, opt) => { tg.addEventListener(ev, fn, opt); listeners.push([tg, ev, fn, opt]); };
 
@@ -235,6 +321,7 @@ export function viewReader(params) {
     clearTimeout(timer);
     if (saveNow) saveNow();
     if (pager) pager.destroy();
+    if (audioCtl) audioCtl.destroy();
     listeners.forEach(([tg, ev, fn, opt]) => tg.removeEventListener(ev, fn, opt));
     document.body.classList.remove('reading');
     document.body.classList.remove('rd-lock');
@@ -405,7 +492,14 @@ export function viewReader(params) {
       h('button', { class: 'rd-ico', type: 'button', 'aria-label': t('book.contents'), onclick: () => openSheet(tocSheet) }, ico('<path d="M4 6h16M4 12h16M4 18h10"/>')),
       h('button', { class: 'rd-ico', type: 'button', 'aria-label': t('reader.settings'), onclick: () => openSheet(setSheet) }, 'Aa'));
 
+    audioCtl = chapter.audio_path ? createAudio({
+      path: chapter.audio_path, chapterId: chapter.id, bookId: book.id,
+      nextId: chapters[idx + 1] ? chapters[idx + 1].id : null,
+      bookTitle: book.title, chapterTitle: chapter.title,
+      onNext: () => goChapter(true)
+    }) : null;
     const foot = h('footer', { class: 'rd-foot' },
+      audioCtl ? audioCtl.el : null,
       h('div', { class: 'rd-foot-in' }, prevEl, h('div', { class: 'rd-track' }, fill), pct, nextEl));
 
     mount(bar, host, foot, tocSheet, setSheet);
