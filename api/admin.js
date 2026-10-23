@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const SCRIPTS = { kk: ['cyrillic', 'latin', 'arabic'], ru: ['cyrillic'], zh: ['han'], en: ['latin'] };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_BYTES = 3800000;
+const AUDIO_MAX = 50 * 1024 * 1024 - 4096; // Supabase 免费版单文件上限 50MB
+const AUDIO_EXT = ['mp3', 'm4a'];
 
 const sha = (s) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
 const digest = (s) => crypto.createHash('sha256').update(String(s)).digest();
@@ -28,6 +30,12 @@ async function db(method, path, { params, body, prefer } = {}) {
   const text = await res.text();
   if (!res.ok) throw new HttpError(500, '数据库错误 ' + res.status + '：' + text.slice(0, 300));
   return text ? JSON.parse(text) : null;
+}
+
+function storageEnv() {
+  const key = process.env.SUPABASE_SERVICE_KEY;
+  const base = process.env.SUPABASE_URL.replace(/\/+$/, '');
+  return { key, base, sh: { apikey: key, Authorization: 'Bearer ' + key } };
 }
 
 const needId = (id) => { if (typeof id !== 'string' || !UUID.test(id)) throw bad('书籍 ID 不正确'); return id; };
@@ -128,8 +136,73 @@ const actions = {
 
   async list_chapters({ book_id }) {
     needId(book_id);
-    const rows = await db('GET', 'chapters', { params: { select: 'id,chapter_number,title', book_id: 'eq.' + book_id, order: 'chapter_number.asc', limit: '2000' } });
-    return { chapters: rows };
+    const params = { select: 'id,chapter_number,title,audio_path,audio_bytes,audio_seconds', book_id: 'eq.' + book_id, order: 'chapter_number.asc', limit: '2000' };
+    let rows;
+    try { rows = await db('GET', 'chapters', { params }); } catch (e) { // 还没给数据库加音频字段时
+      params.select = 'id,chapter_number,title';
+      rows = await db('GET', 'chapters', { params });
+    }
+    return { chapters: rows, audio_ready: rows.length === 0 || 'audio_path' in rows[0] };
+  },
+
+  // ---- 有声书：文件太大，不能经过本接口，所以只发“一次性上传地址”，由浏览器直接传到 Storage ----
+  async audio_sign({ chapter_id, ext, size }) {
+    needId(chapter_id);
+    if (!AUDIO_EXT.includes(ext)) throw bad('只支持 mp3 或 m4a 格式');
+    if (!Number.isInteger(size) || size < 1000) throw bad('文件大小不正确');
+    if (size > AUDIO_MAX) throw bad('文件超过 50MB，请压缩或按章节拆分后再传');
+    const rows = await db('GET', 'chapters', { params: { select: 'id,book_id', id: 'eq.' + chapter_id } });
+    if (!rows.length) throw new HttpError(404, '找不到这一章');
+    const { key, base, sh } = storageEnv();
+    await fetch(base + '/storage/v1/bucket', {
+      method: 'POST', headers: { ...sh, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'audio', name: 'audio', public: true })
+    }).catch(() => {});
+    const path = rows[0].book_id + '/' + chapter_id + '-' + Date.now() + '.' + ext;
+    const r = await fetch(base + '/storage/v1/object/upload/sign/audio/' + path, {
+      method: 'POST', headers: { ...sh, 'Content-Type': 'application/json', 'x-upsert': 'true' }, body: '{}'
+    });
+    const text = await r.text();
+    if (!r.ok) throw new HttpError(500, '创建上传地址失败 ' + r.status + '：' + text.slice(0, 200));
+    let j; try { j = JSON.parse(text); } catch (e) { throw new HttpError(500, '上传地址格式异常'); }
+    if (!j.url) throw new HttpError(500, '上传地址缺失');
+    void key;
+    const upload_url = /^https?:/i.test(j.url) ? j.url : base + '/storage/v1' + j.url;
+    return { upload_url, path };
+  },
+
+  async audio_commit({ chapter_id, path, bytes, seconds }) {
+    needId(chapter_id);
+    const rows = await db('GET', 'chapters', { params: { select: 'id,book_id,audio_path', id: 'eq.' + chapter_id } });
+    if (!rows.length) throw new HttpError(404, '找不到这一章');
+    const ch = rows[0];
+    const re = new RegExp('^' + ch.book_id + '/' + chapter_id + '-\\d+\\.(mp3|m4a)$');
+    if (typeof path !== 'string' || !re.test(path)) throw bad('音频路径不正确');
+    if (!Number.isInteger(bytes) || bytes < 1000 || bytes > AUDIO_MAX) throw bad('文件大小不正确');
+    const secs = Number.isFinite(seconds) && seconds >= 0 && seconds < 86400 ? Math.round(seconds) : 0;
+    const { base, sh } = storageEnv();
+    // 核对：存储里的文件大小必须和浏览器上传的一致，才算成功
+    const head = await fetch(base + '/storage/v1/object/public/audio/' + path, { method: 'HEAD' });
+    if (!head.ok) throw bad('没有在存储里找到这个音频，上传可能没有成功');
+    const len = parseInt(head.headers.get('content-length') || '0', 10);
+    if (len !== bytes) throw bad('存储里的文件大小（' + len + '）和上传的（' + bytes + '）不一致，请重新上传');
+    await db('PATCH', 'chapters', { params: { id: 'eq.' + chapter_id }, body: { audio_path: path, audio_bytes: bytes, audio_seconds: secs } });
+    if (ch.audio_path && ch.audio_path !== path) {
+      await fetch(base + '/storage/v1/object/audio/' + ch.audio_path, { method: 'DELETE', headers: sh }).catch(() => {});
+    }
+    return { ok: true, audio_path: path, audio_bytes: bytes, audio_seconds: secs };
+  },
+
+  async audio_remove({ chapter_id }) {
+    needId(chapter_id);
+    const rows = await db('GET', 'chapters', { params: { select: 'id,audio_path', id: 'eq.' + chapter_id } });
+    if (!rows.length) throw new HttpError(404, '找不到这一章');
+    await db('PATCH', 'chapters', { params: { id: 'eq.' + chapter_id }, body: { audio_path: null, audio_bytes: null, audio_seconds: null } });
+    if (rows[0].audio_path) {
+      const { base, sh } = storageEnv();
+      await fetch(base + '/storage/v1/object/audio/' + rows[0].audio_path, { method: 'DELETE', headers: sh }).catch(() => {});
+    }
+    return { ok: true };
   },
 
   async get_chapter({ id }) {
