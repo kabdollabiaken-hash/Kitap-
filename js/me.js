@@ -4,6 +4,7 @@ import { storage } from './storage.js';
 import { h, enc } from './ui.js';
 import { getBooksByIds } from './api-extra.js';
 import { getSession, login, signOut, sync, takeAuthError } from './auth.js';
+import { isStandalone, isIOS, canPrompt, promptInstall, onInstallChange } from './pwa.js';
 
 const pad2 = (n) => String(n).padStart(2, '0');
 const dateKey = (d) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
@@ -133,11 +134,28 @@ export function viewMe({ cover }) {
     syncBtn.disabled = false;
   });
   const outBtn = h('button', { class: 'me-btn out', type: 'button', onclick: () => { if (confirm(t('me.signout.confirm'))) signOut(); } }, t('me.signout'));
+  // 安装到手机主屏幕
+  const installBox = h('div', { class: 'me-install' });
+  const drawInstall = () => {
+    installBox.replaceChildren();
+    if (isStandalone()) return;
+    if (canPrompt()) {
+      installBox.append(h('button', { class: 'me-btn', type: 'button', onclick: async () => { await promptInstall(); drawInstall(); } }, t('me.install')));
+    } else if (isIOS()) {
+      installBox.append(h('p', { class: 'me-hint' }, t('me.install.ios')));
+    } else {
+      installBox.append(h('p', { class: 'me-hint' }, t('me.install.menu')));
+    }
+  };
+  drawInstall();
+  onInstallChange(drawInstall);
+
   const settings = h('section', { class: 'me-card' },
     h('h2', { class: 'me-h2' }, t('me.settings')),
     h('div', { class: 'me-label' }, t('lang.label')),
     langChips(() => { window.dispatchEvent(new HashChangeEvent('hashchange')); }),
-    h('div', { class: 'me-acts' }, syncBtn, outBtn), msg);
+    h('div', { class: 'me-acts' }, syncBtn, outBtn), msg,
+    h('div', { class: 'me-label', style: 'margin-top:16px' }, t('me.install.title')), installBox);
 
   return h('div', { class: 'me' }, head, timeCard, grid, recentBox, settings);
 }
