@@ -53,7 +53,7 @@ function write(key, val) { return writeRaw(key, JSON.stringify(val)); }
 })();
 
 // ---- 偏好 ----
-const DEFAULT_PREFS = { lang: 'kk', theme: 'white', fontSize: 20, lineHeight: 1.9, margin: 'normal', pageMode: 'curl', anim: true };
+const DEFAULT_PREFS = { lang: 'kk', theme: 'white', fontSize: 20, lineHeight: 1.9, margin: 'normal', pageMode: 'curl', anim: true, audioRate: 1 };
 const THEMES = ['white', 'sepia', 'green', 'night'];
 const MARGINS = ['narrow', 'normal', 'wide'];
 const PAGE_MODES = ['curl', 'slide', 'scroll'];
@@ -68,6 +68,7 @@ function sanitizePrefs(p) {
     if (MARGINS.includes(p.margin)) o.margin = p.margin;
     if (PAGE_MODES.includes(p.pageMode)) o.pageMode = p.pageMode;
     if (typeof p.anim === 'boolean') o.anim = p.anim;
+    if ([0.75, 1, 1.25, 1.5, 2].includes(p.audioRate)) o.audioRate = p.audioRate;
   }
   return o;
 }
@@ -137,6 +138,21 @@ export const storage = {
     const all = read('progress', {}, isObj);
     all[bookId] = { chapterId, ratio: Math.min(1, Math.max(0, ratio)), ts: Date.now() };
     write('progress', all);
+  },
+
+  // 有声书播放位置：{ 章节ID: { t: 秒, d: 总秒数, ts } }，只保留最近 60 条
+  getAudioPos(chapterId) {
+    const p = read('audiopos', {}, isObj)[chapterId];
+    return p && Number.isFinite(p.t) && p.t >= 0 ? p : null;
+  },
+  setAudioPos(chapterId, t, d) {
+    if (!Number.isFinite(t) || t < 0) return;
+    const all = read('audiopos', {}, isObj);
+    all[chapterId] = { t: Math.round(t), d: Number.isFinite(d) ? Math.round(d) : 0, ts: Date.now() };
+    const keys = Object.keys(all).sort((a, b) => (all[b].ts || 0) - (all[a].ts || 0));
+    const out = {};
+    keys.slice(0, 60).forEach((k) => { out[k] = all[k]; });
+    write('audiopos', out);
   },
 
   // 阅读时长：按本地日期累计秒数，例如 {"2026-10-20": 1234}，只保留最近 400 天
