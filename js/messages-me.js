@@ -23,7 +23,11 @@ addMessages({
     'me.synced': 'Синхрондалды',
     'me.syncfail': 'Синхрондау қатесі',
     'me.signout': 'Шығу',
-    'me.signout.confirm': 'Аккаунттан шығасыз ба?'
+    'me.signout.confirm': 'Аккаунттан шығасыз ба?',
+    'me.install.title': 'Қолданбаны орнату',
+    'me.install': 'Орнату',
+    'me.install.ios': 'Safari-де «Бөлісу» батырмасын басып, «Басты экранға қосу» таңдаңыз.',
+    'me.install.menu': 'Браузер мәзірінен «Басты экранға қосу» немесе «Қолданбаны орнату» таңдаңыз.'
   },
   ru: {
     'nav.me': 'Я',
@@ -47,7 +51,11 @@ addMessages({
     'me.synced': 'Синхронизировано',
     'me.syncfail': 'Ошибка синхронизации',
     'me.signout': 'Выйти',
-    'me.signout.confirm': 'Выйти из аккаунта?'
+    'me.signout.confirm': 'Выйти из аккаунта?',
+    'me.install.title': 'Установить приложение',
+    'me.install': 'Установить',
+    'me.install.ios': 'В Safari нажмите «Поделиться» и выберите «На экран Домой».',
+    'me.install.menu': 'В меню браузера выберите «Добавить на главный экран» или «Установить приложение».'
   },
   zh: {
     'nav.me': '我',
@@ -71,7 +79,11 @@ addMessages({
     'me.synced': '已同步',
     'me.syncfail': '同步失败',
     'me.signout': '退出登录',
-    'me.signout.confirm': '确定退出登录吗？'
+    'me.signout.confirm': '确定退出登录吗？',
+    'me.install.title': '安装到手机',
+    'me.install': '安装到主屏幕',
+    'me.install.ios': '在 Safari 里点“分享”按钮，选“添加到主屏幕”。',
+    'me.install.menu': '在浏览器菜单里选“添加到主屏幕”或“安装应用”。'
   },
   en: {
     'nav.me': 'Me',
@@ -95,6 +107,10 @@ addMessages({
     'me.synced': 'Synced',
     'me.syncfail': 'Sync failed',
     'me.signout': 'Sign out',
-    'me.signout.confirm': 'Sign out of your account?'
+    'me.signout.confirm': 'Sign out of your account?',
+    'me.install.title': 'Install the app',
+    'me.install': 'Install',
+    'me.install.ios': 'In Safari, tap Share, then choose Add to Home Screen.',
+    'me.install.menu': 'In the browser menu, choose Add to Home screen or Install app.'
   }
 });
