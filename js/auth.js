@@ -6,7 +6,7 @@ const SUPABASE_URL = pick(/_URL$/);
 const ANON_KEY = pick(/_KEY$/);
 
 const P = 'kitap:v1:';
-const KEYS = ['shelf', 'recent', 'progress', 'readtime', 'prefs'];
+const KEYS = ['shelf', 'recent', 'progress', 'readtime', 'prefs', 'audiopos'];
 const SESS = 'kitap:auth';
 const META = 'kitap:syncmeta';
 
@@ -44,6 +44,11 @@ export function merge(a, b) { // a = 本机，b = 云端
   }
   out.readtime = { ...(b.readtime || {}) };
   for (const [k, v] of Object.entries(a.readtime || {})) out.readtime[k] = Math.max(v, out.readtime[k] || 0);
+  out.audiopos = { ...(b.audiopos || {}) };
+  for (const [k, v] of Object.entries(a.audiopos || {})) {
+    const o = out.audiopos[k];
+    if (!o || (v.ts || 0) > (o.ts || 0)) out.audiopos[k] = v;
+  }
   out.prefs = a.prefs || b.prefs || null;
   return out;
 }
