@@ -1,0 +1,11 @@
+/* 阅读页底部的有声书播放条（颜色跟随阅读主题） */
+.au { max-width: 760px; margin-inline: auto; display: flex; align-items: center; gap: 6px; padding: 8px 12px 0; }
+.au button { min-width: 44px; min-height: 44px; border: 0; background: transparent; color: var(--ink); font: inherit; cursor: pointer; border-radius: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+.au .au-play { background: var(--acc); color: var(--bg); width: 48px; height: 48px; flex: none; }
+.au .au-skip { font-size: 12px; font-weight: 600; flex-direction: column; line-height: 1; gap: 2px; }
+.au .au-rate { font-size: 14px; font-weight: 600; border: 1px solid var(--line); min-width: 52px; }
+.au-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0; }
+.au-mid input[type=range] { width: 100%; margin: 0; accent-color: var(--acc); min-height: 28px; background: transparent; }
+.au-time { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; direction: ltr; }
+.au-err { color: #b3362b; font-size: 13px; padding: 4px 16px 0; text-align: center; }
+.au svg { pointer-events: none; }
