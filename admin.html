@@ -548,6 +548,26 @@ function splitMd(text, level, fallback) {
   return chs.map((c) => ({ title: c.title, content: c.lines.join('\n').replace(/^\n+|\n+$/g, '') })).filter((c) => c.content.trim() !== '');
 }
 
+// 粘贴的文字：用单独一行 --- 分章，每章第一行是标题
+function splitSep(text) {
+  const out = [];
+  let buf = [];
+  const flush = () => {
+    while (buf.length && buf[0].trim() === '') buf.shift();
+    if (buf.length) {
+      const title = buf[0].trim();
+      const content = buf.slice(1).join('\n').replace(/^\n+|\n+$/g, '');
+      if (content.trim() !== '') out.push({ title, content });
+    }
+    buf = [];
+  };
+  for (const line of text.split('\n')) {
+    if (/^\s*-{3,}\s*$/.test(line)) flush(); else buf.push(line);
+  }
+  flush();
+  return out;
+}
+
 const baseName = (n) => n.replace(/\.[^.]+$/, '');
 const dirOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '');
 const resolvePath = (base, rel) => {
@@ -728,6 +748,8 @@ async function viewUpload(box) {
     pub: h('input', { type: 'checkbox', checked: true }),
     rep: h('input', { type: 'checkbox' }),
     files: h('input', { type: 'file', multiple: true, accept: '.txt,.epub,.docx,.html,.htm,.md,.markdown' }),
+    paste: h('textarea', { dir: 'auto', rows: '10', placeholder: '把记事本里的文字复制，粘贴到这里…' }),
+    splitMode: h('select', {}, [['md', '按 # 开头的标题行分章（例如：# 第一章）'], ['sep', '按单独一行的 --- 分章（每章第一行是标题）'], ['one', '不分章，整段作为一章']].map(([v, l]) => h('option', { value: v }, l))),
     level: h('select', {}, [['auto', '自动'], ['1', '一级标题'], ['2', '二级标题'], ['3', '三级标题'], ['0', '不分章（整本一章）']].map(([v, l]) => h('option', { value: v }, l)))
   };
   const fillScripts = () => {
@@ -891,6 +913,37 @@ async function viewUpload(box) {
     if (!conv.items.length) throw new Error('没有转换出任何章节');
   }
 
+  const convBtn = h('button', { class: 'ghost', type: 'button' }, '转换成章节');
+  convBtn.addEventListener('click', () => {
+    try {
+      const text = f.paste.value.replace(/\r\n?/g, '\n');
+      if (text.trim() === '') throw new Error('请先在上面的框里粘贴文字');
+      if (text.includes('\uFFFD') || text.includes('\u0000')) throw new Error('文字里有乱码字符或空字符，请检查来源');
+      mode = 'conv'; chapters = [];
+      const fb = f.title.value.trim() || 'Chapter 1';
+      const m = f.splitMode.value;
+      if (m === 'md') {
+        levelBox.style.display = '';
+        f.level.value = 'auto';
+        conv = { kind: 'md', text, fallback: fb, items: [] };
+        applySplit();
+      } else if (m === 'sep') {
+        levelBox.style.display = 'none';
+        conv = { kind: 'fixed', items: [] };
+        setItems(splitSep(text));
+      } else {
+        levelBox.style.display = 'none';
+        conv = { kind: 'fixed', items: [] };
+        setItems([{ title: fb, content: text.replace(/^\n+|\n+$/g, '') }]);
+      }
+      if (!conv.items.length) throw new Error('没有转换出任何章节。检查一下分章方式，每章要有标题行和正文');
+    } catch (e) {
+      mode = 'none'; conv = null;
+      levelBox.style.display = 'none';
+      preview.replaceChildren(h('p', { class: 'err' }, e.message));
+    }
+  });
+
   f.files.addEventListener('change', async () => {
     mode = 'none'; chapters = []; conv = null;
     levelBox.style.display = 'none';
@@ -972,6 +1025,10 @@ async function viewUpload(box) {
     h('label', { class: 'chk' }, f.pub, '校验通过后立即上架'),
     h('label', { class: 'chk' }, f.rep, '覆盖已有的同一本书（同名同作者）'),
     field('书的文件：多个 .txt 章节文件（001.txt、002.txt…，第 1 行标题，第 2 行空行，第 3 行起正文），或者一个 EPUB / Word(.docx) / HTML / Markdown 文件', f.files),
+    h('p', { class: 'muted' }, '——或者——不用文件，直接粘贴文字（不会有编码问题，原文一个字都不改）：'),
+    f.paste,
+    field('分章方式', f.splitMode),
+    h('div', { class: 'row' }, convBtn),
     levelBox,
     preview,
     h('div', { class: 'row' }, go),
