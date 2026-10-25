@@ -107,12 +107,77 @@ let tab = 'books';
 function renderMain() {
   const tabs = h('div', { class: 'tabs' },
     h('button', { class: tab === 'books' ? '' : 'ghost', onclick: () => { tab = 'books'; renderMain(); } }, '书籍管理'),
-    h('button', { class: tab === 'upload' ? '' : 'ghost', onclick: () => { tab = 'upload'; renderMain(); } }, '上传新书'));
+    h('button', { class: tab === 'upload' ? '' : 'ghost', onclick: () => { tab = 'upload'; renderMain(); } }, '上传新书'),
+    h('button', { class: tab === 'cats' ? '' : 'ghost', onclick: () => { tab = 'cats'; renderMain(); } }, '分类'));
   const body = h('div');
   root.replaceChildren(
     h('div', { class: 'top' }, h('h1', {}, '管理后台'), h('button', { class: 'ghost', onclick: logout }, '退出')),
     tabs, body);
-  if (tab === 'books') viewBooks(body); else viewUpload(body);
+  if (tab === 'books') viewBooks(body); else if (tab === 'cats') viewCats(body); else viewUpload(body);
+}
+
+// ---------- 分类管理 ----------
+const CAT_LANGS = [['kk', '哈萨克语（必填）'], ['ru', '俄语'], ['zh', '中文'], ['en', '英语']];
+
+function catForm(c, onSave, onCancel) {
+  const slug = h('input', { value: c ? c.slug : '', placeholder: '例如 novel', autocapitalize: 'none' });
+  const names = {};
+  const fields = CAT_LANGS.map(([k, label]) => {
+    names[k] = h('input', { dir: 'auto', value: (c && c.name && c.name[k]) || '' });
+    return [h('label', {}, label), names[k]];
+  });
+  const msg = h('div', { class: 'muted' });
+  const save = h('button', {}, '保存');
+  save.addEventListener('click', async () => {
+    save.disabled = true; msg.className = 'muted'; msg.textContent = '保存中…';
+    const name = {};
+    CAT_LANGS.forEach(([k]) => { name[k] = names[k].value; });
+    try { await onSave(slug.value.trim(), name); } catch (e) { msg.className = 'err'; msg.textContent = e.message; save.disabled = false; }
+  });
+  return h('div', { class: 'editbox' },
+    h('label', {}, '英文标识（小写字母、数字、-，不能重复）'), slug, fields.flat(),
+    h('div', { class: 'row' }, save, h('button', { class: 'ghost', type: 'button', onclick: onCancel }, '取消')), msg);
+}
+
+async function viewCats(box) {
+  const listEl = h('div');
+  const addBox = h('div');
+  const msg = h('div', { class: 'muted' });
+  const say = (t, cls) => { msg.className = cls || 'muted'; msg.textContent = t; };
+  let cats = [];
+  const load = async () => {
+    try { cats = (await api('category_list')).categories; draw(); } catch (e) { listEl.replaceChildren(h('p', { class: 'err' }, e.message)); }
+  };
+  const draw = () => {
+    if (!cats.length) { listEl.replaceChildren(h('p', { class: 'muted' }, '还没有分类。点上面的“新增分类”。')); return; }
+    listEl.replaceChildren(...cats.map((c) => {
+      const holder = h('div', { class: 'card' });
+      const show = () => holder.replaceChildren(
+        h('div', { class: 'bt', dir: 'auto' }, (c.name && (c.name.zh || c.name.kk)) || c.slug),
+        h('div', { class: 'muted', dir: 'auto' }, CAT_LANGS.map(([k]) => (c.name && c.name[k]) ? k + '：' + c.name[k] : null).filter(Boolean).join('　')),
+        h('div', { class: 'muted' }, '标识：' + c.slug + '　·　' + c.books + ' 本书'),
+        h('div', { class: 'row' },
+          h('button', { class: 'ghost', type: 'button', onclick: () => holder.replaceChildren(catForm(c, async (slug, name) => {
+            await api('category_update', { id: c.id, slug, name });
+            say('✓ 已保存', 'ok'); await load();
+          }, show)) }, '编辑'),
+          h('button', { class: 'danger', type: 'button', onclick: async () => {
+            if (!confirm('删除分类“' + ((c.name && (c.name.zh || c.name.kk)) || c.slug) + '”？')) return;
+            try { await api('category_delete', { id: c.id }); say('已删除', 'muted'); await load(); } catch (e) { say(e.message, 'err'); }
+          } }, '删除')));
+      show();
+      return holder;
+    }));
+  };
+  const addBtn = h('button', { type: 'button', onclick: () => {
+    if (addBox.firstChild) { addBox.replaceChildren(); return; }
+    addBox.replaceChildren(h('div', { class: 'card' }, catForm(null, async (slug, name) => {
+      await api('category_create', { slug, name });
+      addBox.replaceChildren(); say('✓ 已新增', 'ok'); await load();
+    }, () => addBox.replaceChildren())));
+  } }, '新增分类');
+  box.replaceChildren(h('div', { class: 'row', style: 'margin:0 0 10px' }, addBtn), addBox, msg, listEl);
+  load();
 }
 
 const STATUS = { published: '已上架', hidden: '已下架', draft: '草稿' };
