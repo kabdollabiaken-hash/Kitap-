@@ -48,6 +48,22 @@ async function getChapter(bookId, chapterId) {
   return rows[0] || null;
 }
 
+// 每一章的字数（数据库里的 char_count 字段）：用来算“整本书”的进度和总页数
+async function getChapterLengths(bookId) {
+  try {
+    const url = new URL(SUPABASE_URL + '/rest/v1/chapters');
+    url.searchParams.set('select', 'id,char_count');
+    url.searchParams.set('book_id', 'eq.' + bookId);
+    url.searchParams.set('limit', '5000');
+    const r = await fetch(url, { headers: { apikey: SUPABASE_KEY } });
+    if (!r.ok) return null;
+    const rows = await r.json();
+    const m = new Map();
+    for (const x of rows) { if (!Number.isFinite(x.char_count)) return null; m.set(x.id, x.char_count); }
+    return m;
+  } catch (e) { return null; }
+}
+
 async function sha256(text) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -123,6 +139,7 @@ function createPager(o) {
   const pages = countPages(A.flow, W, rtl);
   cur = o.atLast ? pages - 1 : Math.min(pages - 1, Math.max(0, Math.round(o.ratio * (pages - 1))));
 
+  const relabel = () => { num.textContent = o.label ? o.label(cur, pages) : (cur + 1) + ' / ' + pages; };
   const place = (L, p) => { L.flow.style.transform = 'translateX(' + ((rtl ? 1 : -1) * p * stride) + 'px)'; };
   const rest = () => {
     place(A, cur);
@@ -135,7 +152,7 @@ function createPager(o) {
     B.layer.style.visibility = 'hidden';
     B.layer.style.transform = '';
     B.shade.style.opacity = '0';
-    num.textContent = (cur + 1) + ' / ' + pages;
+    relabel();
   };
 
   // top：正在翻的那一层；t：翻开的程度 0（盖住）~1（翻走）
@@ -288,6 +305,7 @@ function createPager(o) {
     ratio: () => (pages > 1 ? cur / (pages - 1) : 0),
     prog: () => (pages > 1 ? cur / (pages - 1) : 1),
     flip,
+    relabel,
     key(e) {
       const k = e.key;
       if (k === 'ArrowRight') flip(!rtl);
@@ -398,11 +416,38 @@ export function viewReader(params) {
     // ---- 进度条 ----
     const fill = h('div', { class: 'rd-fill' });
     const pct = h('span', { class: 'rd-pct' }, '0%');
+    // 整本书的进度：按字数算（拿不到字数时，退回按章节数算）
+    const chapChars = chapter.content.length;
+    let bookInfo = null; // { before: 前面章节的字数, total: 全书字数 }
     const updateBar = () => {
-      const total = Math.round(((idx + getProg()) / chapters.length) * 100);
+      const frac = bookInfo
+        ? (bookInfo.before + getProg() * chapChars) / Math.max(1, bookInfo.total)
+        : (idx + getProg()) / chapters.length;
+      const total = Math.min(100, Math.max(0, Math.round(frac * 100)));
       fill.style.width = total + '%';
       pct.textContent = total + '%';
     };
+    // 整本书的页码：每页大约多少字，按当前章节实际分出的页数估算
+    const labelFor = (cur, pages) => {
+      if (!bookInfo) return (cur + 1) + ' / ' + pages;
+      const cpp = Math.max(1, chapChars) / pages;
+      const totalPages = Math.max(1, Math.round(bookInfo.total / cpp));
+      const page = Math.min(totalPages, Math.round(bookInfo.before / cpp) + cur + 1);
+      return page + ' / ' + totalPages;
+    };
+    getChapterLengths(book.id).then((lens) => {
+      if (disposed || !lens) return;
+      let before = 0; let total = 0;
+      chapters.forEach((c, i) => {
+        const n = c.id === chapter.id ? chapChars : (lens.get(c.id) || 0);
+        if (i < idx) before += n;
+        total += n;
+      });
+      if (total <= 0) return;
+      bookInfo = { before, total };
+      updateBar();
+      if (pager && pager.relabel) pager.relabel();
+    });
 
     // ---- 上一章 / 下一章 ----
     const chapterLink = (c, key) => (c
@@ -563,7 +608,7 @@ export function viewReader(params) {
         stage.style.setProperty('--pg-x', ((sw - W) / 2) + 'px');
         stage.style.setProperty('--pg-y', PAD_TOP + 'px');
         pager = createPager({
-          stage, A, B, num, W, rtl, mode, anim: prefs.anim, ratio, atLast,
+          stage, A, B, num, W, rtl, mode, anim: prefs.anim, ratio, atLast, label: labelFor,
           onPage: () => { updateBar(); queueSave(); },
           onEdge: (fwd) => goChapter(fwd)
         });
