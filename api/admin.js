@@ -55,10 +55,58 @@ function checkChapterText(title, content, clientSha) {
   if (sha(content) !== clientSha) throw bad('正文在传输中发生变化（哈希不一致），已停止');
 }
 
+function checkCategory(slug, name) {
+  if (typeof slug !== 'string' || !/^[a-z0-9][a-z0-9-]{0,40}$/.test(slug)) throw bad('英文标识只能用小写英文字母、数字和 -，例如 novel');
+  if (!name || typeof name !== 'object') throw bad('缺少分类名称');
+  const out = {};
+  for (const k of ['kk', 'ru', 'zh', 'en']) {
+    const v = name[k];
+    if (v === undefined || v === null || String(v).trim() === '') continue;
+    if (typeof v !== 'string' || v.length > 60 || v.includes('\uFFFD') || v.includes('\u0000')) throw bad('分类名称不正确（' + k + '）');
+    out[k] = v.trim();
+  }
+  if (!out.kk) throw bad('哈萨克语名称必须填写（其他语言没填时会显示哈萨克语）');
+  return { slug, name: out };
+}
+
 const actions = {
   async categories() {
     const rows = await db('GET', 'categories', { params: { select: 'id,slug,name', order: 'slug.asc' } });
     return { categories: rows };
+  },
+
+  // ---- 分类管理 ----
+  async category_list() {
+    const cats = await db('GET', 'categories', { params: { select: 'id,slug,name', order: 'slug.asc' } });
+    const books = await db('GET', 'books', { params: { select: 'category_id', limit: '10000' } });
+    const count = {};
+    for (const b of books) if (b.category_id) count[b.category_id] = (count[b.category_id] || 0) + 1;
+    return { categories: cats.map((c) => ({ ...c, books: count[c.id] || 0 })) };
+  },
+
+  async category_create({ slug, name }) {
+    const clean = checkCategory(slug, name);
+    const exists = await db('GET', 'categories', { params: { select: 'id', slug: 'eq.' + clean.slug } });
+    if (exists.length) throw bad('这个英文标识已经有了：' + clean.slug);
+    await db('POST', 'categories', { body: clean, prefer: 'return=minimal' });
+    return { ok: true };
+  },
+
+  async category_update({ id, slug, name }) {
+    needId(id);
+    const clean = checkCategory(slug, name);
+    const dup = await db('GET', 'categories', { params: { select: 'id', slug: 'eq.' + clean.slug, id: 'neq.' + id } });
+    if (dup.length) throw bad('这个英文标识已经被别的分类用了：' + clean.slug);
+    await db('PATCH', 'categories', { params: { id: 'eq.' + id }, body: clean });
+    return { ok: true };
+  },
+
+  async category_delete({ id }) {
+    needId(id);
+    const used = await db('GET', 'books', { params: { select: 'id', category_id: 'eq.' + id, limit: '1000' } });
+    if (used.length) throw bad('还有 ' + used.length + ' 本书在用这个分类。请先把它们改成别的分类，再删除');
+    await db('DELETE', 'categories', { params: { id: 'eq.' + id } });
+    return { ok: true };
   },
 
   async list() {
