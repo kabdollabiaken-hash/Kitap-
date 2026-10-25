@@ -9,7 +9,7 @@
   var exp = parseInt(p.get('expires_at') || '0', 10) || (Math.floor(Date.now() / 1000) + parseInt(p.get('expires_in') || '3600', 10));
   var u = {};
   try { var b = at.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); u = JSON.parse(decodeURIComponent(escape(atob(b + '==='.slice((b.length + 3) % 4))))); } catch (e) {}
-  localStorage.setItem('kitap:auth', JSON.stringify({ access_token: at, refresh_token: rt, expires_at: exp, email: u.email || '', uid: u.sub || '', name: (u.user_metadata && (u.user_metadata.full_name || u.user_metadata.name)) || '', picture: (u.user_metadata && (u.user_metadata.avatar_url || u.user_metadata.picture)) || '' }));
+  localStorage.setItem('shuhyla:auth', JSON.stringify({ access_token: at, refresh_token: rt, expires_at: exp, email: u.email || '', uid: u.sub || '', name: (u.user_metadata && (u.user_metadata.full_name || u.user_metadata.name)) || '', picture: (u.user_metadata && (u.user_metadata.avatar_url || u.user_metadata.picture)) || '' }));
   location.replace('/');
 })();
 </script></body></html>
