@@ -1,7 +1,7 @@
 {
-  "name": "Kitap",
-  "short_name": "Kitap",
-  "description": "Kitap — kazakh, russian, chinese and english books",
+  "name": "Shuhyla",
+  "short_name": "Shuhyla",
+  "description": "Shuhyla — kazakh, russian, chinese and english books",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
