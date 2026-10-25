@@ -10,7 +10,7 @@ export const LANGS = [
 // 只放界面文案，不放书籍内容
 const dict = {
   kk: {
-    'brand': 'Kitap',
+    'brand': 'Shuhyla',
     'nav.aria': 'Негізгі навигация',
     'nav.home': 'Басты бет',
     'nav.library': 'Кітапхана',
@@ -63,7 +63,7 @@ const dict = {
     'notfound.home': 'Басты бетке оралу'
   },
   ru: {
-    'brand': 'Kitap',
+    'brand': 'Shuhyla',
     'nav.aria': 'Основная навигация',
     'nav.home': 'Главная',
     'nav.library': 'Библиотека',
@@ -116,7 +116,7 @@ const dict = {
     'notfound.home': 'На главную'
   },
   zh: {
-    'brand': 'Kitap',
+    'brand': 'Shuhyla',
     'nav.aria': '主导航',
     'nav.home': '首页',
     'nav.library': '书库',
@@ -169,7 +169,7 @@ const dict = {
     'notfound.home': '返回首页'
   },
   en: {
-    'brand': 'Kitap',
+    'brand': 'Shuhyla',
     'nav.aria': 'Main navigation',
     'nav.home': 'Home',
     'nav.library': 'Library',
