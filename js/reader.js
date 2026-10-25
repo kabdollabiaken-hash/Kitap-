@@ -48,6 +48,39 @@ async function getChapter(bookId, chapterId) {
   return rows[0] || null;
 }
 
+// ---------- 缓存：翻到下一章时不用再等网络 ----------
+const TTL = 5 * 60 * 1000;
+const bookCache = new Map(); // bookId -> { ts, book, chapters }
+const chCache = new Map(); // chapterId -> { ts, row }
+const chPending = new Map();
+const fresh = (e) => e && Date.now() - e.ts < TTL;
+
+async function getBookData(bookId) {
+  const e = bookCache.get(bookId);
+  if (fresh(e)) return e;
+  const book = await getBook(bookId);
+  if (!book) return { book: null, chapters: [] };
+  const chapters = await getChapterList(book.id);
+  const v = { ts: Date.now(), book, chapters };
+  bookCache.set(bookId, v);
+  return v;
+}
+
+function getChapterCached(bookId, chapterId) {
+  const e = chCache.get(chapterId);
+  if (fresh(e)) return Promise.resolve(e.row);
+  if (chPending.has(chapterId)) return chPending.get(chapterId);
+  const p = getChapter(bookId, chapterId).then((row) => {
+    if (row) {
+      chCache.set(chapterId, { ts: Date.now(), row });
+      while (chCache.size > 8) chCache.delete(chCache.keys().next().value);
+    }
+    return row;
+  }).finally(() => { chPending.delete(chapterId); });
+  chPending.set(chapterId, p);
+  return p;
+}
+
 // 每一章的字数（数据库里的 char_count 字段）：用来算“整本书”的进度和总页数
 async function getChapterLengths(bookId) {
   try {
@@ -216,6 +249,7 @@ function createPager(o) {
   const begin = (fwd, vert) => {
     const target = cur + (fwd ? 1 : -1);
     if (target < 0 || target >= pages) return null;
+    if (B.fill) B.fill();
     const top = fwd ? A : B;
     const under = fwd ? B : A;
     place(B, target);
@@ -581,14 +615,17 @@ export function viewReader(params) {
         root.classList.add('rd-paged');
         document.body.classList.add('rd-lock');
         window.scrollTo(0, 0);
-        const mk = () => {
-          const flow = h('div', { class: 'pg-flow', lang: tag, dir: rtl ? 'rtl' : 'ltr' }, flowNodes());
+        const mk = (lazy) => {
+          const flow = h('div', { class: 'pg-flow', lang: tag, dir: rtl ? 'rtl' : 'ltr' }, lazy ? [] : flowNodes());
           const shade = h('div', { class: 'pg-shade' });
           const layer = h('div', { class: 'pg-layer' }, h('div', { class: 'pg-clip' }, flow), shade);
-          return { layer, flow, shade };
+          const L = { layer, flow, shade, filled: !lazy };
+          // B 层（翻页时露出的那一页）先留空，等第一屏显示出来后再在空闲时填充，减少进入章节时的卡顿
+          L.fill = () => { if (!L.filled) { L.filled = true; flow.replaceChildren(...flowNodes()); } };
+          return L;
         };
-        const A = mk();
-        const B = mk();
+        const A = mk(false);
+        const B = mk(true);
         B.layer.style.visibility = 'hidden';
         const num = h('div', { class: 'pg-num' });
         const stage = h('div', { class: 'pg-stage' }, B.layer, A.layer, num);
@@ -613,6 +650,8 @@ export function viewReader(params) {
           onEdge: (fwd) => goChapter(fwd)
         });
         pager.size = sw + 'x' + sh;
+        const idle = window.requestIdleCallback ? (f) => window.requestIdleCallback(f, { timeout: 800 }) : (f) => setTimeout(f, 250);
+        idle(() => { if (!disposed && B.fill) B.fill(); });
         getRaw = pager.ratio;
         getProg = pager.prog;
       }
@@ -620,6 +659,14 @@ export function viewReader(params) {
       saveNow();
       updateBar();
     };
+
+    // 预取前后章节：翻过去的时候直接从内存里取
+    setTimeout(() => {
+      [idx + 1, idx - 1].forEach((i) => {
+        if (disposed || i < 0 || i >= chapters.length) return;
+        getChapterCached(book.id, chapters[i].id).catch(() => {});
+      });
+    }, 400);
 
     const prog = storage.getProgress(book.id);
     const want = prog && prog.chapterId === chapter.id && prog.ratio < 0.98 ? prog.ratio : 0;
@@ -661,14 +708,13 @@ export function viewReader(params) {
   };
 
   const load = async () => {
-    mount(h('div', { class: 'rd-msg' }, h('p', {}, t('common.loading'))));
+    const hit = fresh(bookCache.get(bookId)) && (!chapterId || fresh(chCache.get(chapterId)));
+    if (!hit) mount(h('div', { class: 'rd-msg' }, h('p', {}, t('common.loading'))));
     try {
       if (!isUuid(bookId)) { mount(message('book.notfound')); return; }
-      const book = await getBook(bookId);
+      const { book, chapters } = await getBookData(bookId);
       if (disposed) return;
       if (!book) { mount(message('book.notfound')); return; }
-      const chapters = await getChapterList(book.id);
-      if (disposed) return;
       if (!chapters.length) { mount(message('book.nochapters')); return; }
 
       if (!chapterId) {
@@ -680,7 +726,7 @@ export function viewReader(params) {
       }
       const idx = chapters.findIndex((c) => c.id === chapterId);
       if (idx < 0) { mount(message('reader.chapterMissing')); return; }
-      const chapter = await getChapter(book.id, chapterId);
+      const chapter = await getChapterCached(book.id, chapterId);
       if (disposed) return;
       if (!chapter) { mount(message('reader.chapterMissing')); return; }
       await build(book, chapters, idx, chapter);
