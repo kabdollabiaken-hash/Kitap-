@@ -132,6 +132,7 @@ const listeners = [];
 export const onAuth = (cb) => { listeners.push(cb); };
 const notify = () => listeners.forEach((cb) => { try { cb(); } catch (e) { /* ignore */ } });
 export const getSession = () => getSess();
+export const getToken = token;
 export const isLoggedIn = () => !!getSess();
 export function takeAuthError() {
   try { const e = sessionStorage.getItem('kitap:autherr'); sessionStorage.removeItem('kitap:autherr'); return e; } catch (e) { return null; }
