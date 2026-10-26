@@ -257,7 +257,7 @@ function createPager(o) {
     B.layer.style.visibility = 'visible';
     top.layer.style.zIndex = '3';
     under.layer.style.zIndex = '1';
-    return { fwd, target, top, under, vert: vert || 'bottom', side: (fwd === !rtl) ? 'right' : 'left' };
+    return { fwd, target, top, under, vert: vert || 'bottom', side: rtl ? 'left' : 'right' }; // 往回翻 = 往前翻的倒放：卷角始终在“翻页那一侧”，上一页从左边卷着铺回来
   };
   const setP = (s, p) => apply(s.top, s.under, s.fwd ? p : 1 - p, s);
   const finish = (s, done) => {
