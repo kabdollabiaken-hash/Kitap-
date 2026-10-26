@@ -5,6 +5,7 @@ import { h, enc } from './ui.js';
 import { getBooksByIds } from './api-extra.js';
 import { getSession, login, signOut, sync, takeAuthError } from './auth.js';
 import { isStandalone, isIOS, canPrompt, promptInstall, onInstallChange } from './pwa.js';
+import { openNotes } from './notes.js';
 
 const pad2 = (n) => String(n).padStart(2, '0');
 const dateKey = (d) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
@@ -157,5 +158,10 @@ export function viewMe({ cover }) {
     h('div', { class: 'me-acts' }, syncBtn, outBtn), msg,
     h('div', { class: 'me-label', style: 'margin-top:16px' }, t('me.install.title')), installBox);
 
-  return h('div', { class: 'me' }, head, timeCard, grid, recentBox, settings);
+ const notesRow = h('button', { class: 'me-link', type: 'button', onclick: () => openNotes() },
+  h('span', { class: 'me-link-i', 'aria-hidden': 'true' }, '✎'),
+  h('span', { class: 'me-link-t' }, t('notes.title')),
+  h('span', { class: 'me-link-a', 'aria-hidden': 'true' }, '›'));
+
+return h('div', { class: 'me' }, head, timeCard, grid, notesRow, recentBox, settings);
 }
