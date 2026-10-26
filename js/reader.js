@@ -8,6 +8,7 @@ import { getBook, getChapterList, langTag, isUuid } from './api.js';
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { h, enc } from './ui.js';
 import { createAudio } from './audio.js';
+import { createMarkUI } from './notes.js';
 
 if (!document.querySelector('link[data-paging]')) {
   const l = document.createElement('link');
@@ -301,10 +302,16 @@ function createPager(o) {
   stage.addEventListener('pointerdown', (e) => {
     if (busy || drag || (e.pointerType === 'mouse' && e.button !== 0)) return;
     drag = { x: e.clientX, y: e.clientY, t: performance.now(), mode: 0, s: null, p: 0, fwd: true };
-    try { stage.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+    if (e.pointerType !== 'mouse') { try { stage.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ } }
   });
   stage.addEventListener('pointermove', (e) => {
     if (!drag) return;
+    // 鼠标拖动 = 选字；手指按住不动超过半秒 = 长按选字：都不翻页
+    if (e.pointerType === 'mouse') {
+      if (drag.mode === 0 && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 5) drag.mode = -1;
+      return;
+    }
+    if (!drag.mode && performance.now() - drag.t > 450) { drag.mode = -1; return; }
     const dx = e.clientX - drag.x;
     const dy = e.clientY - drag.y;
     if (!drag.mode) {
@@ -323,7 +330,11 @@ function createPager(o) {
     const d = drag;
     drag = null;
     if (!d) return;
-    if (d.mode === 0) { if (!cancelled) tap(e.clientX, e.clientY); return; }
+    if (d.mode === 0) {
+      // 长按（选字）不算轻点；点在划线上或有选中文字时，先交给划线工具条处理
+      if (!cancelled && performance.now() - d.t < 450 && !(o.onTap && o.onTap(e.clientX, e.clientY))) tap(e.clientX, e.clientY);
+      return;
+    }
     if (d.mode !== 1) return;
     if (!d.s) { if (!cancelled && d.p > 0.25) o.onEdge(d.fwd); return; }
     const v = (d.p * W * 0.85) / Math.max(1, performance.now() - d.t);
@@ -340,6 +351,19 @@ function createPager(o) {
     prog: () => (pages > 1 ? cur / (pages - 1) : 1),
     flip,
     relabel,
+    go(p) { // 直接跳到某一页（从“我的笔记”点进来时用）
+      if (busy || drag) return;
+      cur = Math.max(0, Math.min(pages - 1, p));
+      rest();
+      o.onPage();
+    },
+    pageOf(el) { // 某个元素在第几页
+      const fr = A.flow.getBoundingClientRect();
+      const r = el.getClientRects()[0];
+      if (!r) return -1;
+      const d = rtl ? fr.right - r.right : r.left - fr.left;
+      return Math.max(0, Math.floor((d + 2) / stride));
+    },
     key(e) {
       const k = e.key;
       if (k === 'ArrowRight') flip(!rtl);
@@ -365,6 +389,7 @@ export function viewReader(params) {
   let saveNow = null;
   let pager = null;
   let audioCtl = null;
+  let marksUI = null;
   const listeners = [];
   const listen = (tg, ev, fn, opt) => { tg.addEventListener(ev, fn, opt); listeners.push([tg, ev, fn, opt]); };
 
@@ -374,6 +399,7 @@ export function viewReader(params) {
     if (saveNow) saveNow();
     if (pager) pager.destroy();
     if (audioCtl) audioCtl.destroy();
+    if (marksUI) marksUI.destroy();
     listeners.forEach(([tg, ev, fn, opt]) => tg.removeEventListener(ev, fn, opt));
     document.body.classList.remove('reading');
     document.body.classList.remove('rd-lock');
@@ -438,12 +464,39 @@ export function viewReader(params) {
     if (disposed) return;
 
     // 按空行分段；段内换行原样保留（pre-wrap）；每段按实际文字确定方向
-    const blocks = chapter.content.split(/\r?\n(?:[ \t]*\r?\n)+/).filter((b) => b.trim() !== '');
+    // 每段记下它在整章正文里的起始位置（划线要靠它定位）
+    const blocks = [];
+    {
+      const src = chapter.content;
+      const re = /\r?\n(?:[ \t]*\r?\n)+/g;
+      let pos = 0;
+      let mm;
+      const push = (s, e) => { const tx = src.slice(s, e); if (tx.trim() !== '') blocks.push({ text: tx, start: s }); };
+      while ((mm = re.exec(src))) { push(pos, mm.index); pos = mm.index + mm[0].length; }
+      push(pos, src.length);
+    }
     const showCopyright = book.copyright_note && !String(book.copyright_note).startsWith('__');
+
+    // 划线和想法
+    let layers = null; // 分页模式：[A, B] 两层
+    let dirty = false;
+    const ui = createMarkUI({ root, book, chapter, onChange: () => repaint() });
+    marksUI = ui;
+    const repaint = () => { // 划线变了：原地重画正文（排版不变，所以页数和位置都不变）
+      if (disposed) return;
+      if (!ready) { dirty = true; return; }
+      if (prefs.pageMode === 'scroll') {
+        const art = host.querySelector('.rd-body');
+        if (art) art.replaceChildren(...flowNodes());
+      } else if (layers) {
+        layers.forEach((L) => { if (L.filled) L.flow.replaceChildren(...flowNodes()); });
+      }
+    };
+
     const flowNodes = () => [
       integrityBad ? h('div', { class: 'rd-warn', role: 'alert' }, t('reader.integrity')) : null,
       h('h1', { class: 'rd-h', dir: 'auto' }, chapter.title),
-      blocks.map((b) => h('p', { class: 'rd-p', dir: dirMode }, b)),
+      blocks.map((b) => h('p', { class: 'rd-p', dir: dirMode, 'data-s': String(b.start) }, ui.paragraph(b.text, b.start))),
       showCopyright ? h('div', { class: 'rd-note' }, t('book.copyright') + ': ', h('span', { dir: 'auto' }, book.copyright_note)) : null
     ].flat(Infinity);
 
@@ -599,6 +652,8 @@ export function viewReader(params) {
     const renderContent = async (ratio, atLast) => {
       const token = ++renderToken;
       ready = false;
+      ui.hide();
+      layers = null;
       if (pager) { pager.destroy(); pager = null; }
       const mode = prefs.pageMode;
 
@@ -626,6 +681,7 @@ export function viewReader(params) {
         };
         const A = mk(false);
         const B = mk(true);
+        layers = [A, B];
         B.layer.style.visibility = 'hidden';
         const num = h('div', { class: 'pg-num' });
         const stage = h('div', { class: 'pg-stage' }, B.layer, A.layer, num);
@@ -646,8 +702,9 @@ export function viewReader(params) {
         stage.style.setProperty('--pg-y', PAD_TOP + 'px');
         pager = createPager({
           stage, A, B, num, W, rtl, mode, anim: prefs.anim, ratio, atLast, label: labelFor,
-          onPage: () => { updateBar(); queueSave(); },
-          onEdge: (fwd) => goChapter(fwd)
+          onPage: () => { ui.hide(); updateBar(); queueSave(); },
+          onEdge: (fwd) => goChapter(fwd),
+          onTap: (x, y) => ui.tap(x, y)
         });
         pager.size = sw + 'x' + sh;
         const idle = window.requestIdleCallback ? (f) => window.requestIdleCallback(f, { timeout: 800 }) : (f) => setTimeout(f, 250);
@@ -658,6 +715,20 @@ export function viewReader(params) {
       ready = true;
       saveNow();
       updateBar();
+      if (dirty) { dirty = false; repaint(); }
+    };
+
+    // 从“我的笔记”点进来：翻到那条划线所在的页，并闪一下
+    const jumpTo = async (id, marksReady) => {
+      await Promise.race([marksReady, new Promise((r) => setTimeout(r, 1500))]);
+      if (disposed || !ready) return;
+      const scope = prefs.pageMode === 'scroll' ? host : (layers && layers[0].flow);
+      const hl = scope && scope.querySelector('.hl[data-m="' + id + '"]');
+      if (!hl) return;
+      if (prefs.pageMode === 'scroll') hl.scrollIntoView({ block: 'center' });
+      else if (pager) { const pg = pager.pageOf(hl); if (pg >= 0) pager.go(pg); }
+      const again = scope.querySelector('.hl[data-m="' + id + '"]');
+      if (again) { again.classList.add('hl-flash'); setTimeout(() => again.classList.remove('hl-flash'), 1800); }
     };
 
     // 预取前后章节：翻过去的时候直接从内存里取
@@ -668,12 +739,18 @@ export function viewReader(params) {
       });
     }, 400);
 
+    const jm = (location.hash.match(/[?&]m=([0-9a-f-]{36})/i) || [])[1] || '';
+    const marksReady = ui.load(); // 先用本机缓存的划线，云端的随后到
     const prog = storage.getProgress(book.id);
     const want = prog && prog.chapterId === chapter.id && prog.ratio < 0.98 ? prog.ratio : 0;
     const atLast = gotoLast === chapter.id;
     if (atLast) gotoLast = null;
     await renderContent(want, atLast);
     if (disposed) return;
+    if (jm) {
+      try { history.replaceState(null, '', location.pathname + location.search + '#/read/' + enc(book.id) + '/' + enc(chapter.id)); } catch (e) { /* ignore */ }
+      jumpTo(jm, marksReady);
+    }
 
     // ---- 保存进度 ----
     listen(window, 'scroll', () => {
@@ -683,8 +760,11 @@ export function viewReader(params) {
     }, { passive: true });
     listen(document, 'visibilitychange', () => { if (document.visibilityState === 'hidden' && saveNow) saveNow(); });
     listen(window, 'pagehide', () => { if (saveNow) saveNow(); });
+    // 滚动模式：点划线打开工具条；点别处收起工具条
+    listen(host, 'click', (e) => { if (prefs.pageMode === 'scroll') ui.tap(e.clientX, e.clientY); });
     listen(document, 'keydown', (e) => {
-      if (e.key === 'Escape') { tocSheet.hidden = true; setSheet.hidden = true; return; }
+      if (e.target && /^(TEXTAREA|INPUT)$/.test(e.target.tagName)) return; // 写想法时不翻页
+      if (e.key === 'Escape') { tocSheet.hidden = true; setSheet.hidden = true; ui.hide(); return; }
       if (pager && tocSheet.hidden && setSheet.hidden) pager.key(e);
     });
 
