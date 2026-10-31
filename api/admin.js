@@ -393,6 +393,55 @@ const actions = {
     return { ok: true, count: rows.length };
   },
 
+  // ---- 错字反馈 ----
+  async typo_list({ status }) {
+    const st = ['new', 'fixed', 'rejected'].includes(status) ? status : 'new';
+    const rows = await db('GET', 'typo_reports', {
+      params: {
+        select: 'id,book_id,chapter_id,selected_text,suggestion,note,char_start,context,status,created_at,books(title),chapters(chapter_number,title)',
+        status: 'eq.' + st,
+        order: 'created_at.desc',
+        limit: '200'
+      }
+    });
+    return { reports: rows };
+  },
+
+  async typo_apply({ id }) {
+    needId(id);
+    const rep = await db('GET', 'typo_reports', { params: { select: '*', id: 'eq.' + id, status: 'eq.new' } });
+    if (!rep.length) throw new HttpError(404, '找不到这条反馈，或已经处理过');
+    const r = rep[0];
+    if (!r.context || !Number.isInteger(r.char_start)) throw bad('这条反馈没有位置信息，请在章节编辑里手动修改');
+    if (r.suggestion.includes('\u0000') || r.suggestion.includes('\uFFFD')) throw bad('建议的文字含有乱码');
+    const ch = await db('GET', 'chapters', { params: { select: 'id,content', id: 'eq.' + r.chapter_id } });
+    if (!ch.length) throw new HttpError(404, '找不到这一章');
+    const content = ch[0].content;
+    const sel = r.selected_text;
+    let off = Math.min(30, r.char_start);
+    if (r.context.substr(off, sel.length) !== sel) {
+      off = r.context.indexOf(sel);
+      if (off < 0) throw bad('在上下文里找不到这段文字，请手动修改');
+    }
+    const first = content.indexOf(r.context);
+    if (first < 0 || content.indexOf(r.context, first + 1) >= 0) throw bad('上下文在本章里不唯一，或章节已经被改过，请手动修改');
+    const at = first + off;
+    const next = content.slice(0, at) + r.suggestion + content.slice(at + sel.length);
+    const h = sha(next);
+    await db('PATCH', 'chapters', { params: { id: 'eq.' + r.chapter_id }, body: { content: next, source_sha256: h } });
+    const back = await db('GET', 'chapters', { params: { select: 'content_sha256', id: 'eq.' + r.chapter_id } });
+    if (!back.length || back[0].content_sha256 !== h) return { ok: false, problems: ['正文哈希不一致'] };
+    await db('PATCH', 'typo_reports', { params: { id: 'eq.' + id }, body: { status: 'fixed' } });
+    return { ok: true };
+  },
+
+  async typo_set({ id, status }) {
+    needId(id);
+    if (!['new', 'fixed', 'rejected'].includes(status)) throw bad('状态不正确');
+    await db('PATCH', 'typo_reports', { params: { id: 'eq.' + id }, body: { status } });
+    return { ok: true };
+  },
+
   async finalize({ book_id, expected, book, publish }) {
     needId(book_id);
     const b = await bookStatus(book_id);
