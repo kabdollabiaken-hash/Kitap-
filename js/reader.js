@@ -493,12 +493,12 @@ export function viewReader(params) {
       }
     };
 
-    const flowNodes = () => [
-      integrityBad ? h('div', { class: 'rd-warn', role: 'alert' }, t('reader.integrity')) : null,
-      h('h1', { class: 'rd-h', dir: 'auto' }, chapter.title),
-      blocks.map((b) => h('p', { class: 'rd-p', dir: dirMode, 'data-s': String(b.start) }, ui.paragraph(b.text, b.start))),
-      showCopyright ? h('div', { class: 'rd-note' }, t('book.copyright') + ': ', h('span', { dir: 'auto' }, book.copyright_note)) : null
-    ].flat(Infinity);
+  const flowNodes = () => [
+  integrityBad ? h('div', { class: 'rd-warn', role: 'alert' }, t('reader.integrity')) : null,
+  h('h1', { class: 'rd-h', dir: 'auto', style: 'text-align:center' }, chapter.title),
+  blocks.map((b) => h('p', { class: 'rd-p', dir: dirMode, 'data-s': String(b.start) }, ui.paragraph(b.text, b.start))),
+  showCopyright ? h('div', { class: 'rd-note' }, t('book.copyright') + ': ', h('span', { dir: 'auto' }, book.copyright_note)) : null
+  ].flat(Infinity).filter(Boolean);
 
     // ---- 进度条 ----
     const fill = h('div', { class: 'rd-fill' });
