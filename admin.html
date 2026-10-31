@@ -108,12 +108,13 @@ function renderMain() {
   const tabs = h('div', { class: 'tabs' },
     h('button', { class: tab === 'books' ? '' : 'ghost', onclick: () => { tab = 'books'; renderMain(); } }, '书籍管理'),
     h('button', { class: tab === 'upload' ? '' : 'ghost', onclick: () => { tab = 'upload'; renderMain(); } }, '上传新书'),
-    h('button', { class: tab === 'cats' ? '' : 'ghost', onclick: () => { tab = 'cats'; renderMain(); } }, '分类'));
+    h('button', { class: tab === 'cats' ? '' : 'ghost', onclick: () => { tab = 'cats'; renderMain(); } }, '分类'),
+    h('button', { class: tab === 'typos' ? '' : 'ghost', onclick: () => { tab = 'typos'; renderMain(); } }, '纠错'));
   const body = h('div');
   root.replaceChildren(
     h('div', { class: 'top' }, h('h1', {}, '管理后台'), h('button', { class: 'ghost', onclick: logout }, '退出')),
     tabs, body);
-  if (tab === 'books') viewBooks(body); else if (tab === 'cats') viewCats(body); else viewUpload(body);
+  if (tab === 'books') viewBooks(body); else if (tab === 'cats') viewCats(body); else if (tab === 'typos') viewTypos(body); else viewUpload(body);
 }
 
 // ---------- 分类管理 ----------
@@ -177,6 +178,67 @@ async function viewCats(box) {
     }, () => addBox.replaceChildren())));
   } }, '新增分类');
   box.replaceChildren(h('div', { class: 'row', style: 'margin:0 0 10px' }, addBtn), addBox, msg, listEl);
+  load();
+}
+
+  // ---------- 纠错反馈 ----------
+async function viewTypos(box) {
+  let status = 'new';
+  const NAMES = { new: '待处理', fixed: '已处理', rejected: '已拒绝' };
+  const bar = h('div', { class: 'tabs' });
+  const listEl = h('div');
+  const msg = h('div', { class: 'muted' });
+  const say = (t, cls) => { msg.className = cls || 'muted'; msg.textContent = t; };
+
+  const drawBar = () => bar.replaceChildren(...Object.keys(NAMES).map((s) =>
+    h('button', { class: status === s ? '' : 'ghost', onclick: () => { status = s; load(); } }, NAMES[s])));
+
+  const load = async () => {
+    drawBar();
+    listEl.replaceChildren(h('p', { class: 'muted' }, '加载中…'));
+    try { draw((await api('typo_list', { status })).reports); } catch (e) { listEl.replaceChildren(h('p', { class: 'err' }, e.message)); }
+  };
+
+  const run = async (fn) => {
+    say('');
+    try { await fn(); await load(); } catch (e) { say(e.message, 'err'); }
+  };
+
+  const draw = (reports) => {
+    if (!reports.length) { listEl.replaceChildren(h('p', { class: 'muted' }, '没有“' + NAMES[status] + '”的反馈。')); return; }
+    listEl.replaceChildren(...reports.map((r) => {
+      const where = (r.books && r.books.title ? '《' + r.books.title + '》' : '') +
+        (r.chapters ? ' · 第 ' + r.chapters.chapter_number + ' 章 ' + r.chapters.title : '');
+      const btns = h('div', { class: 'row' });
+      if (r.status === 'new') {
+        btns.append(
+          h('button', { type: 'button', onclick: () => {
+            if (!confirm('把“' + r.selected_text + '”改成“' + r.suggestion + '”？会直接修改这一章的正文。')) return;
+            run(async () => {
+              const x = await api('typo_apply', { id: r.id });
+              if (!x.ok) throw new Error('保存了，但校验没通过：' + x.problems.join('；'));
+              say('✓ 已修改正文，校验通过', 'ok');
+            });
+          } }, '采纳并修改'),
+          h('button', { class: 'ghost', type: 'button', onclick: () => run(async () => { await api('typo_set', { id: r.id, status: 'fixed' }); say('已标记为已处理', 'muted'); }) }, '我已手动改'),
+          h('button', { class: 'danger', type: 'button', onclick: () => run(async () => { await api('typo_set', { id: r.id, status: 'rejected' }); say('已拒绝', 'muted'); }) }, '拒绝'));
+      } else {
+        btns.append(h('button', { class: 'ghost', type: 'button', onclick: () => run(async () => { await api('typo_set', { id: r.id, status: 'new' }); say('已恢复为待处理', 'muted'); }) }, '恢复为待处理'));
+      }
+      return h('div', { class: 'card' },
+        h('div', { class: 'muted', dir: 'auto' }, where),
+        h('div', { dir: 'auto', style: 'margin-top:6px' },
+          '错：', h('span', { style: 'background:#fde8e8;padding:0 4px;border-radius:4px' }, r.selected_text)),
+        h('div', { dir: 'auto', style: 'margin-top:4px' },
+          '改为：', h('span', { style: 'background:#d5efe8;padding:0 4px;border-radius:4px' }, r.suggestion)),
+        r.context ? h('div', { class: 'muted', dir: 'auto', style: 'margin-top:6px' }, '上下文：…' + r.context + '…') : h('div', { class: 'muted', style: 'margin-top:6px' }, '没有位置信息，只能手动修改'),
+        r.note ? h('div', { class: 'muted', dir: 'auto' }, '备注：' + r.note) : null,
+        h('div', { class: 'muted' }, new Date(r.created_at).toLocaleString()),
+        btns);
+    }));
+  };
+
+  box.replaceChildren(h('p', { class: 'muted' }, '读者在阅读页选中错字后提交的反馈。“采纳并修改”会自动改这一章正文并重新校验；改不了的会提示原因，到“书籍管理 → 章节”里手动改。'), bar, msg, listEl);
   load();
 }
 
