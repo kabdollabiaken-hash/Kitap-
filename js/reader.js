@@ -113,6 +113,45 @@ function ico(inner) {
 
 const nextFrame = () => new Promise((res) => requestAnimationFrame(() => res()));
 
+// ---------- 字体 ----------
+const FONT_KEYS = ['default', 'serif', 'sans', 'naskh'];
+const fontOptions = (arab) => (arab ? ['default', 'naskh', 'serif', 'sans'] : ['default', 'serif', 'sans']);
+const FONT_STACK = {
+  naskh: '"ShuhylaNaskh","Noto Naskh Arabic","Noto Serif",serif',
+  serif: '"Noto Serif","Noto Naskh Arabic","Noto Serif CJK SC","Source Han Serif SC","Songti SC",Georgia,serif',
+  sans: '"Noto Sans","Noto Sans Arabic","Noto Sans CJK SC","PingFang SC",Roboto,"Helvetica Neue",Arial,sans-serif'
+};
+const FONT_TX = {
+  kk: { label: 'Қаріп', default: 'Әдепкі', naskh: 'Нәскі', serif: 'Сериф', sans: 'Гротеск' },
+  ru: { label: 'Шрифт', default: 'По умолчанию', naskh: 'Насх', serif: 'С засечками', sans: 'Без засечек' },
+  zh: { label: '字体', default: '默认', naskh: '纳斯赫体', serif: '衬线', sans: '黑体' },
+  en: { label: 'Font', default: 'Default', naskh: 'Naskh', serif: 'Serif', sans: 'Sans' }
+};
+const FX = (k) => {
+  const l = (document.documentElement.lang || '').slice(0, 2).toLowerCase();
+  return (FONT_TX[l] || FONT_TX.kk)[k];
+};
+const readFont = () => {
+  try { const v = localStorage.getItem('rd-font'); return FONT_KEYS.includes(v) ? v : ''; } catch (e) { return ''; }
+};
+const saveFont = (v) => { try { localStorage.setItem('rd-font', v); } catch (e) { /* ignore */ } };
+if (!document.querySelector('style[data-rd-font]')) {
+  const st = document.createElement('style');
+  st.setAttribute('data-rd-font', '1');
+  st.textContent = '.rd[data-font] .rd-h,.rd[data-font] .rd-p,.rd[data-font] .rd-note{font-family:var(--rd-font)!important}';
+  document.head.appendChild(st);
+}
+let naskhLoading = false;
+const loadNaskh = () => {
+  if (naskhLoading) return;
+  naskhLoading = true;
+  import('/fonts/naskh.js').then((m) => {
+    const s = document.createElement('style');
+    s.textContent = '@font-face{font-family:"ShuhylaNaskh";src:url("' + m.default + '") format("woff");font-weight:400 700;font-display:swap;unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFF,U+200C-200F}';
+    document.head.appendChild(s);
+  }).catch(() => {});
+};
+
 // ---------- 错字反馈 ----------
 const TYPO_TX = {
   kk: { title: 'Қате туралы хабарлау', hint: 'Қате сөзді таңдап, осы түймені басыңыз.', wrong: 'Қате мәтін', fix: 'Дұрыс нұсқасы', note: 'Ескерту (міндетті емес)', send: 'Жіберу', ok: 'Рақмет! Жіберілді.', err: 'Жіберілмеді, қайталап көріңіз.', need: 'Екі өрісті де толтырыңыз.' },
@@ -410,6 +449,9 @@ export function viewReader(params) {
   const chapterId = params.chapterId || '';
   const root = h('div', { class: 'rd rd-white' });
   let prefs = storage.getPrefs();
+  let fontKey = readFont(); // 空 = 读者还没选过
+  let bookArabic = false; // 当前书是不是阿拉伯文字
+  const effFont = () => fontKey || (bookArabic ? 'naskh' : 'default');
   let disposed = false;
   let ready = false;
   let timer = null;
@@ -440,6 +482,10 @@ export function viewReader(params) {
     root.style.setProperty('--rd-size', prefs.fontSize + 'px');
     root.style.setProperty('--rd-lh', String(prefs.lineHeight));
     root.style.setProperty('--rd-pad', MARGIN_PX[prefs.margin] + 'px');
+    const fk = effFont();
+    if (fk === 'naskh') loadNaskh();
+    if (fk === 'default') { root.removeAttribute('data-font'); root.style.removeProperty('--rd-font'); }
+    else { root.setAttribute('data-font', fk); root.style.setProperty('--rd-font', FONT_STACK[fk]); }
     document.body.style.background = BG[prefs.theme];
   };
   applyPrefs();
@@ -478,6 +524,8 @@ export function viewReader(params) {
     const tag = langTag({ language: chapter.language || book.language, script: chapter.script || book.script });
     const dirMode = chapter.text_direction || book.text_direction || 'auto';
     const rtl = dirMode === 'rtl'; // 从右往左的书：翻页方向也反过来
+    bookArabic = (chapter.script || book.script) === 'arabic';
+    applyPrefs();
 
     storage.addRecent({ bookId: book.id, chapterId: chapter.id, title: book.title, author: book.author });
     document.title = book.title;
@@ -601,6 +649,16 @@ export function viewReader(params) {
       if (prefs.pageMode !== 'scroll' || oldMode !== 'scroll') renderContent(r, false); // 分页模式：重新排版分页
       else { scrollToRatio(r); updateBar(); } // 滚动模式：字号/行距变化后保持原位置
     };
+    const setFont = (k) => {
+      if (k === effFont()) return;
+      const r = getRaw();
+      fontKey = k;
+      saveFont(k);
+      applyPrefs();
+      drawSettings();
+      if (prefs.pageMode !== 'scroll') renderContent(r, false);
+      else { scrollToRatio(r); updateBar(); }
+    };
     const stepRow = (label, val, onDec, onInc) => h('div', { class: 'rd-row' },
       h('span', {}, label),
       h('div', { class: 'rd-step' },
@@ -626,6 +684,10 @@ export function viewReader(params) {
         stepRow(t('reader.lineHeight'), prefs.lineHeight.toFixed(1),
           () => setPref({ lineHeight: round1(prefs.lineHeight - 0.1) }),
           () => setPref({ lineHeight: round1(prefs.lineHeight + 0.1) })),
+        h('div', { class: 'rd-row' },
+          h('span', {}, FX('label')),
+          h('div', { class: 'rd-seg' }, fontOptions(bookArabic).map((k) =>
+            h('button', { class: 'rd-btn', type: 'button', 'aria-pressed': effFont() === k ? 'true' : 'false', onclick: () => setFont(k) }, FX(k))))),
         h('div', { class: 'rd-row' },
           h('span', {}, t('reader.margin')),
           h('div', { class: 'rd-seg' }, MARGINS.map((m) =>
