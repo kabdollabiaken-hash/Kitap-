@@ -113,6 +113,33 @@ function ico(inner) {
 
 const nextFrame = () => new Promise((res) => requestAnimationFrame(() => res()));
 
+// ---------- 错字反馈 ----------
+const TYPO_TX = {
+  kk: { title: 'Қате туралы хабарлау', hint: 'Қате сөзді таңдап, осы түймені басыңыз.', wrong: 'Қате мәтін', fix: 'Дұрыс нұсқасы', note: 'Ескерту (міндетті емес)', send: 'Жіберу', ok: 'Рақмет! Жіберілді.', err: 'Жіберілмеді, қайталап көріңіз.', need: 'Екі өрісті де толтырыңыз.' },
+  ru: { title: 'Сообщить об опечатке', hint: 'Выделите слово с ошибкой и нажмите эту кнопку.', wrong: 'Текст с ошибкой', fix: 'Как правильно', note: 'Комментарий (необязательно)', send: 'Отправить', ok: 'Спасибо! Отправлено.', err: 'Не удалось отправить, попробуйте ещё раз.', need: 'Заполните оба поля.' },
+  zh: { title: '纠错反馈', hint: '先长按选中错字，再点这个按钮。', wrong: '错误的文字', fix: '正确的写法', note: '备注（可选）', send: '提交', ok: '谢谢！已提交。', err: '提交失败，请重试。', need: '请填写错字和正确写法。' },
+  en: { title: 'Report a typo', hint: 'Select the wrong text first, then tap this button.', wrong: 'Text with the error', fix: 'Correct version', note: 'Note (optional)', send: 'Send', ok: 'Thanks! Sent.', err: 'Could not send, please try again.', need: 'Please fill in both fields.' }
+};
+const TX = (k) => {
+  const l = (document.documentElement.lang || '').slice(0, 2).toLowerCase();
+  return (TYPO_TX[l] || TYPO_TX.kk)[k];
+};
+function deviceId() {
+  try {
+    let id = localStorage.getItem('typo_device');
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem('typo_device', id); }
+    return id;
+  } catch (e) { return null; }
+}
+async function sendTypo(row) {
+  const r = await fetch(SUPABASE_URL + '/rest/v1/typo_reports', {
+    method: 'POST',
+    headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+    body: JSON.stringify(row)
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+}
+
 // ---------- 分页：数出一章一共有几页 ----------
 function countPages(flow, W, rtl) {
   const stride = W + PAGE_GAP;
@@ -615,14 +642,82 @@ export function viewReader(params) {
     }
     drawSettings();
 
+    // ---- 错字反馈：先选中错字，再点顶栏的铅笔按钮 ----
+    let lastSel = null;
+    listen(document, 'selectionchange', () => {
+      const s = window.getSelection();
+      if (!s || s.isCollapsed || !s.rangeCount) return;
+      const text = s.toString();
+      if (!text.trim() || text.length > 200) return;
+      const rg = s.getRangeAt(0);
+      const n = rg.startContainer;
+      const p = (n.nodeType === 1 ? n : n.parentElement).closest('.rd-p');
+      if (!p || !root.contains(p)) return;
+      const pre = document.createRange();
+      pre.selectNodeContents(p);
+      pre.setEnd(rg.startContainer, rg.startOffset);
+      const base = Number(p.getAttribute('data-s'));
+      let start = Number.isFinite(base) ? base + pre.toString().length : null;
+      if (start !== null && chapter.content.substr(start, text.length) !== text) start = null;
+      lastSel = { text, start, at: Date.now() };
+    });
+
+    const fieldCss = 'width:100%;box-sizing:border-box;margin-top:6px;padding:8px 10px;border:1px solid rgba(128,128,128,.5);border-radius:8px;background:transparent;color:inherit;font:inherit';
+    const typoBody = h('div', { style: 'display:grid;gap:12px;padding:4px 0' });
+    const typoSheet = makeSheet(TX('title'), typoBody);
+    const drawTypo = () => {
+      const sel = lastSel && Date.now() - lastSel.at < 120000 ? lastSel : null;
+      const wrong = h('textarea', { dir: 'auto', lang: tag, style: fieldCss });
+      const fix = h('textarea', { dir: 'auto', lang: tag, style: fieldCss });
+      const note = h('input', { type: 'text', style: fieldCss });
+      wrong.rows = 2; wrong.maxLength = 200;
+      fix.rows = 2; fix.maxLength = 200;
+      note.maxLength = 500;
+      wrong.value = sel ? sel.text : '';
+      const msg = h('p', { role: 'status', style: 'margin:0;font-size:14px' }, sel ? '' : TX('hint'));
+      const send = h('button', { class: 'rd-btn', type: 'button' }, TX('send'));
+      send.onclick = async () => {
+        const w = wrong.value.trim();
+        const f = fix.value.trim();
+        if (!w || !f) { msg.textContent = TX('need'); return; }
+        send.disabled = true;
+        msg.textContent = '';
+        const start = sel && sel.start !== null && wrong.value === sel.text ? sel.start : null;
+        const context = start !== null
+          ? chapter.content.slice(Math.max(0, start - 30), start + sel.text.length + 30)
+          : null;
+        try {
+          await sendTypo({
+            book_id: book.id, chapter_id: chapter.id,
+            selected_text: w, suggestion: f,
+            note: note.value.trim() || null,
+            char_start: start, context, device_id: deviceId()
+          });
+          msg.textContent = TX('ok');
+          lastSel = null;
+          setTimeout(() => { typoSheet.hidden = true; }, 1200);
+        } catch (e) {
+          console.error(e);
+          msg.textContent = TX('err');
+          send.disabled = false;
+        }
+      };
+      typoBody.replaceChildren(
+        h('label', {}, TX('wrong'), wrong),
+        h('label', {}, TX('fix'), fix),
+        h('label', {}, TX('note'), note),
+        msg, send);
+    };
+
     // ---- 顶栏 / 底栏 ----
     const bar = h('header', { class: 'rd-bar' },
       h('a', { class: 'rd-ico', href: '#/book/' + enc(book.id), 'aria-label': t('reader.back') }, ico('<path d="M15 5l-7 7 7 7"/>')),
       h('div', { class: 'rd-ttl' },
-        h('span', { class: 'rd-t1', lang: bookTag, dir: 'auto' }, book.title),
-        h('span', { class: 'rd-t2', lang: tag, dir: 'auto' }, chapter.title)),
+      h('span', { class: 'rd-t1', lang: bookTag, dir: 'auto' }, book.title),
+      h('span', { class: 'rd-t2', lang: tag, dir: 'auto' }, chapter.title)),
       h('button', { class: 'rd-ico', type: 'button', 'aria-label': t('book.contents'), onclick: () => openSheet(tocSheet) }, ico('<path d="M4 6h16M4 12h16M4 18h10"/>')),
-      h('button', { class: 'rd-ico', type: 'button', 'aria-label': t('reader.settings'), onclick: () => openSheet(setSheet) }, 'Aa'));
+      h('button', { class: 'rd-ico', type: 'button', 'aria-label': t('reader.settings'), onclick: () => openSheet(setSheet) }, 'Aa'),
+      h('button', { class: 'rd-ico', type: 'button', 'aria-label': TX('title'), onclick: () => { drawTypo(); openSheet(typoSheet); } }, ico('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>')));
 
     audioCtl = chapter.audio_path ? createAudio({
       path: chapter.audio_path, chapterId: chapter.id, bookId: book.id,
@@ -634,7 +729,7 @@ export function viewReader(params) {
       audioCtl ? audioCtl.el : null,
       h('div', { class: 'rd-foot-in' }, prevEl, h('div', { class: 'rd-track' }, fill), pct, nextEl));
 
-    mount(bar, host, foot, tocSheet, setSheet);
+    mount(bar, host, foot, tocSheet, setSheet, typoSheet);
 
     saveNow = () => { if (ready) storage.setProgress(book.id, chapter.id, getProg()); };
     const queueSave = () => { clearTimeout(timer); timer = setTimeout(saveNow, 250); };
