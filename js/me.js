@@ -53,6 +53,109 @@ const ME_TX = {
 };
 const mx = () => ME_TX[getLang()] || ME_TX.kk;
 
+// ---------- 勋章 ----------
+// 文案放在这里，不依赖 i18n.js，直接粘贴即可用
+const BD = {
+  zh: {
+    title: '勋章',
+    cat: { time: '阅读时长', books: '阅读书籍', fin: '读完书籍', days: '阅读天数', streak: '连续阅读' },
+    unit: { time: '小时', books: '本', fin: '本', days: '天', streak: '天' },
+    reach: (n, u) => '累积达到' + n + u,
+    left: (n, u, c) => (c === 'fin' ? '再读完' : c === 'streak' ? '再连续阅读' : '再阅读') + n + u + '可得'
+  },
+  en: {
+    title: 'Badges',
+    cat: { time: 'Reading time', books: 'Books read', fin: 'Books finished', days: 'Reading days', streak: 'Streak' },
+    unit: { time: 'hours', books: 'books', fin: 'books', days: 'days', streak: 'days' },
+    reach: (n, u) => n + ' ' + u,
+    left: (n, u) => n + ' more ' + u + ' to unlock'
+  },
+  ru: {
+    title: 'Награды',
+    cat: { time: 'Время чтения', books: 'Прочитано книг', fin: 'Дочитано книг', days: 'Дни чтения', streak: 'Серия' },
+    unit: { time: 'ч', books: 'книг', fin: 'книг', days: 'дн.', streak: 'дн.' },
+    reach: (n, u) => n + ' ' + u,
+    left: (n, u) => 'Ещё ' + n + ' ' + u
+  },
+  kk: {
+    title: 'Медальдар',
+    cat: { time: 'Оқу уақыты', books: 'Оқылған кітаптар', fin: 'Аяқталған кітаптар', days: 'Оқу күндері', streak: 'Үздіксіз оқу' },
+    unit: { time: 'сағат', books: 'кітап', fin: 'кітап', days: 'күн', streak: 'күн' },
+    reach: (n, u) => n + ' ' + u,
+    left: (n, u) => 'Тағы ' + n + ' ' + u
+  }
+};
+const bx = () => BD[getLang()] || BD.kk;
+
+// 每类 6 档，档位越高形状越复杂：圆 → 五边形 → 六边形 → 七边形 → 八边形 → 花边
+const BADGE_CATS = [
+  { key: 'time', color: ['#7fd0f0', '#2f8fd0'], tiers: [1, 10, 50, 100, 500, 1000] },   // 单位：小时
+  { key: 'books', color: ['#8fe3a8', '#3fae6e'], tiers: [1, 5, 10, 50, 100, 500] },
+  { key: 'fin', color: ['#f6a66f', '#df6d2f'], tiers: [1, 5, 10, 50, 100, 200] },
+  { key: 'days', color: ['#f7cf6a', '#e29a1e'], tiers: [3, 7, 30, 100, 200, 365] },
+  { key: 'streak', color: ['#f48fb1', '#d8396b'], tiers: [3, 7, 30, 90, 180, 365] }
+];
+
+let badgeUid = 0;
+function badgePoints(tier) {
+  const cx = 50; const cy = 50;
+  if (tier <= 0) return null; // 圆
+  if (tier >= 5) { // 花边：12 个点交替半径
+    const pts = [];
+    for (let i = 0; i < 24; i++) {
+      const a = (Math.PI * 2 * i) / 24 - Math.PI / 2;
+      const r = i % 2 ? 41 : 47;
+      pts.push((cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1));
+    }
+    return pts.join(' ');
+  }
+  const sides = tier + 4; // 5,6,7,8
+  const pts = [];
+  for (let i = 0; i < sides; i++) {
+    const a = (Math.PI * 2 * i) / sides - Math.PI / 2;
+    pts.push((cx + 46 * Math.cos(a)).toFixed(1) + ',' + (cy + 46 * Math.sin(a)).toFixed(1));
+  }
+  return pts.join(' ');
+}
+
+function badgeSvg(tier, colors, num, earned) {
+  const id = 'bg' + (++badgeUid);
+  const pts = badgePoints(tier);
+  const shape = pts
+    ? '<polygon points="' + pts + '" stroke-linejoin="round"'
+    : '<circle cx="50" cy="50" r="46"';
+  const fill = earned ? 'url(#' + id + ')' : 'rgba(128,128,128,.14)';
+  const stroke = earned ? '#d9b45a' : 'rgba(128,128,128,.45)';
+  const shapeEl = shape + ' fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + (earned ? 3 : 2) + '"/>';
+  const grad = earned
+    ? '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + colors[0] + '"/><stop offset="1" stop-color="' + colors[1] + '"/></linearGradient></defs>'
+    : '';
+  const shine = earned ? '<ellipse cx="38" cy="30" rx="22" ry="10" fill="#fff" opacity=".22"/>' : '';
+  const s = String(num);
+  const size = s.length >= 4 ? 24 : s.length === 3 ? 28 : 34;
+  const txt = '<text x="50" y="' + (earned ? 60 : 60) + '" text-anchor="middle" font-size="' + size + '" font-weight="800" font-family="system-ui,sans-serif" fill="' + (earned ? '#fff' : 'rgba(128,128,128,.7)') + '"' + (earned ? ' stroke="rgba(0,0,0,.18)" stroke-width="1" paint-order="stroke"' : '') + '>' + s + '</text>';
+  return '<svg width="68" height="68" viewBox="0 0 100 100">' + grad + shapeEl + shine + txt + '</svg>';
+}
+
+function ensureBadgeStyle() {
+  if (document.getElementById('me-badge-style')) return;
+  const st = document.createElement('style');
+  st.id = 'me-badge-style';
+  st.textContent = [
+    '.bd-cat{margin-top:18px}',
+    '.bd-cat:first-of-type{margin-top:8px}',
+    '.bd-cat-t{font-weight:600;margin-bottom:6px}',
+    '.bd-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 6px}',
+    '.bd-cell{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;padding-top:26px}',
+    '.bd-cell .bd-ic{line-height:0}',
+    '.bd-cell .bd-lb{font-size:12px;margin-top:4px;line-height:1.3}',
+    '.bd-cell.off .bd-lb{opacity:.5}',
+    '.bd-pill{position:absolute;top:0;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:11px;padding:3px 8px;border-radius:10px;background:rgba(128,128,128,.16)}',
+    '.bd-count{font-size:13px;opacity:.65;font-weight:400;margin-left:6px}'
+  ].join('\n');
+  document.head.append(st);
+}
+
 function openFeedback() {
   if (!FEEDBACK_EMAIL) return;
   const subject = 'Shuhyla ' + APP_VERSION;
@@ -106,6 +209,30 @@ export function viewLogin(rerender) {
 }
 
 // ---------- “我”页 ----------
+// 读完的书：按进度记录里的常见字段尽力判断。
+// 如果你的进度数据结构不同，只需要改 isFinished 这一个函数。
+function isFinished(v) {
+  if (!v || typeof v !== 'object') return false;
+  if (v.done || v.finished || v.completed) return true;
+  const p = v.percent ?? v.pct ?? v.progress ?? v.ratio;
+  if (typeof p === 'number') return p >= 0.98 || p >= 98;
+  return false;
+}
+
+// 历史最长连续阅读天数（勋章一旦获得不会因为断签而消失）
+function longestStreak(map) {
+  const keys = Object.keys(map).filter((k) => map[k] > 0).sort();
+  let best = 0; let run = 0; let prev = null;
+  for (const k of keys) {
+    const [y, m, d] = k.split('-').map(Number);
+    const cur = new Date(y, m - 1, d);
+    if (prev && Math.round((cur - prev) / 86400000) === 1) run++; else run = 1;
+    if (run > best) best = run;
+    prev = cur;
+  }
+  return best;
+}
+
 function stats() {
   const map = storage.getReadTime();
   let total = 0; let days = 0;
@@ -122,9 +249,18 @@ function stats() {
     week.push({ v, dow: x.getDay(), today: i === 0 });
     weekTotal += v;
   }
-  let reading = 0;
-  try { reading = Object.keys(JSON.parse(localStorage.getItem('kitap:v1:progress') || '{}')).length; } catch (e) { /* ignore */ }
-  return { total, days, streak, week, weekTotal, reading, shelf: storage.getShelf().length };
+  let reading = 0; let finished = 0;
+  try {
+    const prog = JSON.parse(localStorage.getItem('kitap:v1:progress') || '{}');
+    const vals = Object.values(prog);
+    reading = vals.length;
+    finished = vals.filter(isFinished).length;
+  } catch (e) { /* ignore */ }
+  return {
+    total, days, streak, week, weekTotal, reading, finished,
+    bestStreak: Math.max(streak, longestStreak(map)),
+    shelf: storage.getShelf().length
+  };
 }
 
 function duration(sec, cls) {
@@ -136,6 +272,46 @@ function duration(sec, cls) {
   return h('div', { class: cls || 'me-dur' },
     hr ? [num(hr), unit('me.h')] : null,
     (mm || !hr) ? [num(mm), unit('me.m')] : null);
+}
+
+function badgesCard(st) {
+  ensureBadgeStyle();
+  const tx = bx();
+  const cur = {
+    time: st.total / 3600,
+    books: st.reading,
+    fin: st.finished,
+    days: st.days,
+    streak: st.bestStreak
+  };
+  let earnedAll = 0; let totalAll = 0;
+  const blocks = BADGE_CATS.map((cat) => {
+    const val = cur[cat.key];
+    const unit = tx.unit[cat.key];
+    let nextMarked = false;
+    const cells = cat.tiers.map((n, i) => {
+      const earned = val >= n;
+      totalAll++; if (earned) earnedAll++;
+      let pill = null;
+      if (!earned && !nextMarked) {
+        nextMarked = true;
+        const remain = Math.max(1, Math.ceil(n - val));
+        pill = h('div', { class: 'bd-pill', style: 'color:' + cat.color[1] }, tx.left(remain, unit, cat.key));
+      }
+      return h('div', { class: 'bd-cell' + (earned ? '' : ' off') },
+        pill,
+        svg(badgeSvg(i, cat.color, n, earned)),
+        h('div', { class: 'bd-lb' }, tx.reach(n, unit)));
+    });
+    return h('div', { class: 'bd-cat' },
+      h('div', { class: 'bd-cat-t' }, tx.cat[cat.key]),
+      h('div', { class: 'bd-grid' }, cells));
+  });
+  const card = h('section', { class: 'me-card' },
+    h('h2', { class: 'me-h2' }, tx.title, h('span', { class: 'bd-count' }, '0/0')),
+    blocks);
+  card.querySelector('.bd-count').textContent = earnedAll + '/' + totalAll;
+  return card;
 }
 
 export function viewMe({ cover }) {
@@ -167,6 +343,8 @@ export function viewMe({ cover }) {
   const cell = (n, key) => h('div', { class: 'me-cell' }, h('b', { class: 'me-num' }, String(n)), h('span', {}, t(key)));
   const grid = h('section', { class: 'me-grid' },
     cell(st.reading, 'me.reading'), cell(st.shelf, 'me.onshelf'), cell(st.days, 'me.days'), cell(st.streak, 'me.streak'));
+
+  const badges = badgesCard(st);
 
   const recent = storage.getRecent().slice(0, 5);
   const recentBox = h('section', { class: 'me-card' }, h('h2', { class: 'me-h2' }, t('me.recent')));
@@ -223,17 +401,13 @@ export function viewMe({ cover }) {
     h('div', { class: 'me-acts' }, syncBtn, outBtn), msg,
     h('div', { class: 'me-label', style: 'margin-top:16px' }, t('me.install.title')), installBox);
 
- const notesRow = h('button', { class: 'me-link', type: 'button', onclick: () => openNotes() },
-  h('span', { class: 'me-link-i', 'aria-hidden': 'true' }, '✎'),
-  h('span', { class: 'me-link-t' }, t('notes.title')),
-  h('span', { class: 'me-link-a', 'aria-hidden': 'true' }, '›'));
-
   const linkRow = (icon, label, onclick) => h('button', { class: 'me-link', type: 'button', onclick },
     h('span', { class: 'me-link-i', 'aria-hidden': 'true' }, icon),
     h('span', { class: 'me-link-t' }, label),
     h('span', { class: 'me-link-a', 'aria-hidden': 'true' }, '›'));
+  const notesRow = linkRow('✎', t('notes.title'), () => openNotes());
   const feedbackRow = FEEDBACK_EMAIL ? linkRow('✉', mx().feedback, openFeedback) : null;
   const aboutRow = linkRow('ⓘ', mx().about, openAbout);
 
-  return h('div', { class: 'me' }, head, timeCard, grid, notesRow, recentBox, settings, feedbackRow, aboutRow);
+  return h('div', { class: 'me' }, head, timeCard, grid, badges, notesRow, recentBox, settings, feedbackRow, aboutRow);
 }
