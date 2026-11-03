@@ -69,6 +69,13 @@ function checkCategory(slug, name) {
   return { slug, name: out };
 }
 
+function authEnv() {
+  const { key, base } = storageEnv();
+  const sh = { apikey: key };
+  if (key.startsWith('eyJ')) sh.Authorization = 'Bearer ' + key;
+  return { base, sh };
+}
+
 const actions = {
   async categories() {
     const rows = await db('GET', 'categories', { params: { select: 'id,slug,name', order: 'slug.asc' } });
@@ -442,34 +449,52 @@ const actions = {
     return { ok: true };
   },
 
-  // ---- 用户统计（Supabase 登录用户）----
+  // ---- 用户（Supabase 登录用户）：统计、列表、屏蔽 ----
   async user_stats() {
-    const { key, base } = storageEnv();
-    const sh = { apikey: key };
-    if (key.startsWith('eyJ')) sh.Authorization = 'Bearer ' + key;
+    const { base, sh } = authEnv();
     const DAY = 86400000;
     const now = Date.now();
-    const mask = (e) => { const [a, b] = String(e || '').split('@'); return b ? a.slice(0, 2) + '***@' + b : '—'; };
     let total = 0; let d1 = 0; let d7 = 0; let d30 = 0; let active7 = 0;
-    const recent = [];
+    const users = [];
     for (let page = 1; page <= 20; page++) {
       const r = await fetch(base + '/auth/v1/admin/users?page=' + page + '&per_page=1000', { headers: sh });
       if (!r.ok) throw new HttpError(500, '读取用户失败 ' + r.status + '：' + (await r.text()).slice(0, 200));
       const j = await r.json();
-      const users = Array.isArray(j) ? j : (j.users || []);
-      for (const u of users) {
+      const list = Array.isArray(j) ? j : (j.users || []);
+      for (const u of list) {
         total++;
         const age = now - Date.parse(u.created_at);
         if (age < DAY) d1++;
         if (age < 7 * DAY) d7++;
         if (age < 30 * DAY) d30++;
         if (u.last_sign_in_at && now - Date.parse(u.last_sign_in_at) < 7 * DAY) active7++;
-        recent.push({ created_at: u.created_at, email: mask(u.email), provider: (u.app_metadata && u.app_metadata.provider) || '' });
+        const meta = u.user_metadata || {};
+        users.push({
+          id: u.id,
+          email: u.email || '',
+          name: meta.full_name || meta.name || '',
+          provider: (u.app_metadata && u.app_metadata.provider) || '',
+          created_at: u.created_at,
+          last_sign_in_at: u.last_sign_in_at || null,
+          banned: !!(u.banned_until && Date.parse(u.banned_until) > now)
+        });
       }
-      if (users.length < 1000) break;
+      if (list.length < 1000) break;
     }
-    recent.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-    return { total, d1, d7, d30, active7, recent: recent.slice(0, 15) };
+    users.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+    return { total, d1, d7, d30, active7, users: users.slice(0, 300) };
+  },
+
+  async user_ban({ id, ban }) {
+    if (typeof id !== 'string' || !UUID.test(id)) throw bad('用户 ID 不正确');
+    const { base, sh } = authEnv();
+    const r = await fetch(base + '/auth/v1/admin/users/' + id, {
+      method: 'PUT',
+      headers: { ...sh, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ban_duration: ban === true ? '876000h' : 'none' })
+    });
+    if (!r.ok) throw new HttpError(500, '操作失败 ' + r.status + '：' + (await r.text()).slice(0, 200));
+    return { ok: true };
   },
 
   async finalize({ book_id, expected, book, publish }) {
