@@ -95,12 +95,13 @@ const BADGE_CATS = [
   { key: 'days', color: ['#f7cf6a', '#e29a1e'], tiers: [3, 7, 30, 100, 200, 365] },
   { key: 'streak', color: ['#f48fb1', '#d8396b'], tiers: [3, 7, 30, 90, 180, 365] }
 ];
+const PREVIEW_COUNT = 3; // 主页卡片上显示几个
 
 let badgeUid = 0;
 function badgePoints(tier) {
   const cx = 50; const cy = 50;
   if (tier <= 0) return null; // 圆
-  if (tier >= 5) { // 花边：12 个点交替半径
+  if (tier >= 5) { // 花边：24 个点交替半径
     const pts = [];
     for (let i = 0; i < 24; i++) {
       const a = (Math.PI * 2 * i) / 24 - Math.PI / 2;
@@ -118,7 +119,7 @@ function badgePoints(tier) {
   return pts.join(' ');
 }
 
-function badgeSvg(tier, colors, num, earned) {
+function badgeSvg(tier, colors, num, earned, size) {
   const id = 'bg' + (++badgeUid);
   const pts = badgePoints(tier);
   const shape = pts
@@ -132,9 +133,10 @@ function badgeSvg(tier, colors, num, earned) {
     : '';
   const shine = earned ? '<ellipse cx="38" cy="30" rx="22" ry="10" fill="#fff" opacity=".22"/>' : '';
   const s = String(num);
-  const size = s.length >= 4 ? 24 : s.length === 3 ? 28 : 34;
-  const txt = '<text x="50" y="' + (earned ? 60 : 60) + '" text-anchor="middle" font-size="' + size + '" font-weight="800" font-family="system-ui,sans-serif" fill="' + (earned ? '#fff' : 'rgba(128,128,128,.7)') + '"' + (earned ? ' stroke="rgba(0,0,0,.18)" stroke-width="1" paint-order="stroke"' : '') + '>' + s + '</text>';
-  return '<svg width="68" height="68" viewBox="0 0 100 100">' + grad + shapeEl + shine + txt + '</svg>';
+  const fs = s.length >= 4 ? 24 : s.length === 3 ? 28 : 34;
+  const txt = '<text x="50" y="60" text-anchor="middle" font-size="' + fs + '" font-weight="800" font-family="system-ui,sans-serif" fill="' + (earned ? '#fff' : 'rgba(128,128,128,.7)') + '"' + (earned ? ' stroke="rgba(0,0,0,.18)" stroke-width="1" paint-order="stroke"' : '') + '>' + s + '</text>';
+  const px = size || 68;
+  return '<svg width="' + px + '" height="' + px + '" viewBox="0 0 100 100">' + grad + shapeEl + shine + txt + '</svg>';
 }
 
 function ensureBadgeStyle() {
@@ -142,6 +144,18 @@ function ensureBadgeStyle() {
   const st = document.createElement('style');
   st.id = 'me-badge-style';
   st.textContent = [
+    // 主页卡片
+    '.bd-card{cursor:pointer;-webkit-tap-highlight-color:transparent}',
+    '.bd-head{display:flex;align-items:center;justify-content:space-between}',
+    '.bd-head .me-h2{margin:0}',
+    '.bd-count{font-size:13px;opacity:.65;font-weight:400;margin-left:6px}',
+    '.bd-arrow{opacity:.5;font-size:20px;line-height:1}',
+    '.bd-prev{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:12px}',
+    '.bd-pv{display:flex;flex-direction:column;align-items:center;text-align:center}',
+    '.bd-pv .bd-ic{line-height:0}',
+    '.bd-pv .bd-lb{font-size:12px;margin-top:4px;line-height:1.3}',
+    '.bd-pv.off .bd-lb{opacity:.5}',
+    // 弹窗里的完整列表
     '.bd-cat{margin-top:18px}',
     '.bd-cat:first-of-type{margin-top:8px}',
     '.bd-cat-t{font-weight:600;margin-bottom:6px}',
@@ -150,8 +164,7 @@ function ensureBadgeStyle() {
     '.bd-cell .bd-ic{line-height:0}',
     '.bd-cell .bd-lb{font-size:12px;margin-top:4px;line-height:1.3}',
     '.bd-cell.off .bd-lb{opacity:.5}',
-    '.bd-pill{position:absolute;top:0;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:11px;padding:3px 8px;border-radius:10px;background:rgba(128,128,128,.16)}',
-    '.bd-count{font-size:13px;opacity:.65;font-weight:400;margin-left:6px}'
+    '.bd-pill{position:absolute;top:0;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:11px;padding:3px 8px;border-radius:10px;background:rgba(128,128,128,.16)}'
   ].join('\n');
   document.head.append(st);
 }
@@ -274,24 +287,54 @@ function duration(sec, cls) {
     (mm || !hr) ? [num(mm), unit('me.m')] : null);
 }
 
-function badgesCard(st) {
-  ensureBadgeStyle();
-  const tx = bx();
-  const cur = {
+function badgeValues(st) {
+  return {
     time: st.total / 3600,
     books: st.reading,
     fin: st.finished,
     days: st.days,
     streak: st.bestStreak
   };
-  let earnedAll = 0; let totalAll = 0;
+}
+
+function badgeCounts(st) {
+  const cur = badgeValues(st);
+  let earned = 0; let total = 0;
+  BADGE_CATS.forEach((cat) => cat.tiers.forEach((n) => { total++; if (cur[cat.key] >= n) earned++; }));
+  return { earned, total };
+}
+
+// 主页上只显示 PREVIEW_COUNT 个：优先显示各类里已获得的最高档，不够再用“下一个目标”补
+function previewItems(st) {
+  const cur = badgeValues(st);
+  const got = []; const goals = [];
+  BADGE_CATS.forEach((cat) => {
+    const val = cur[cat.key];
+    let hi = -1;
+    cat.tiers.forEach((n, i) => { if (val >= n) hi = i; });
+    if (hi >= 0) got.push({ cat, i: hi, earned: true });
+    const nx = hi + 1;
+    if (nx < cat.tiers.length) goals.push({ cat, i: nx, earned: false });
+  });
+  got.sort((a, b) => b.i - a.i);
+  return got.concat(goals).slice(0, PREVIEW_COUNT);
+}
+
+// 弹窗：显示全部勋章
+function openBadges(st) {
+  ensureBadgeStyle();
+  const tx = bx();
+  const cur = badgeValues(st);
+  const { earned: earnedAll, total: totalAll } = badgeCounts(st);
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const close = () => { document.removeEventListener('keydown', onKey); ov.remove(); };
+
   const blocks = BADGE_CATS.map((cat) => {
     const val = cur[cat.key];
     const unit = tx.unit[cat.key];
     let nextMarked = false;
     const cells = cat.tiers.map((n, i) => {
       const earned = val >= n;
-      totalAll++; if (earned) earnedAll++;
       let pill = null;
       if (!earned && !nextMarked) {
         nextMarked = true;
@@ -307,11 +350,43 @@ function badgesCard(st) {
       h('div', { class: 'bd-cat-t' }, tx.cat[cat.key]),
       h('div', { class: 'bd-grid' }, cells));
   });
-  const card = h('section', { class: 'me-card' },
-    h('h2', { class: 'me-h2' }, tx.title, h('span', { class: 'bd-count' }, '0/0')),
-    blocks);
-  card.querySelector('.bd-count').textContent = earnedAll + '/' + totalAll;
-  return card;
+
+  const ov = h('div', {
+    role: 'dialog', 'aria-modal': 'true',
+    style: 'position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center',
+    onclick: (e) => { if (e.target === ov) close(); }
+  },
+  h('div', { style: 'background:#fff;color:#222;width:100%;max-width:560px;max-height:88vh;overflow:auto;border-radius:20px 20px 0 0;padding:20px 20px calc(28px + env(safe-area-inset-bottom));line-height:1.5' },
+    h('div', { style: 'display:flex;justify-content:space-between;align-items:center' },
+      h('strong', { style: 'font-size:18px' }, tx.title, h('span', { class: 'bd-count' }, earnedAll + '/' + totalAll)),
+      h('button', { type: 'button', 'aria-label': mx().close, onclick: close, style: 'background:none;border:0;font-size:20px;padding:6px 10px;cursor:pointer;color:inherit' }, '✕')),
+    blocks));
+  document.addEventListener('keydown', onKey);
+  document.body.append(ov);
+}
+
+// 主页卡片：只显示 3 个，点击打开弹窗
+function badgesCard(st) {
+  ensureBadgeStyle();
+  const tx = bx();
+  const { earned, total } = badgeCounts(st);
+  const items = previewItems(st);
+  const prev = h('div', { class: 'bd-prev' }, items.map((it) => {
+    const n = it.cat.tiers[it.i];
+    return h('div', { class: 'bd-pv' + (it.earned ? '' : ' off') },
+      svg(badgeSvg(it.i, it.cat.color, n, it.earned, 60)),
+      h('div', { class: 'bd-lb' }, tx.cat[it.cat.key]));
+  }));
+  const open = () => openBadges(st);
+  return h('section', {
+    class: 'me-card bd-card', role: 'button', tabindex: '0',
+    onclick: open,
+    onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }
+  },
+  h('div', { class: 'bd-head' },
+    h('h2', { class: 'me-h2' }, tx.title, h('span', { class: 'bd-count' }, earned + '/' + total)),
+    h('span', { class: 'bd-arrow', 'aria-hidden': 'true' }, '›')),
+  prev);
 }
 
 export function viewMe({ cover }) {
