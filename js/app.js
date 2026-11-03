@@ -328,6 +328,55 @@ function bookMissing() {
     h('a', { class: 'btn', href: '#/library' }, t('book.toLibrary')));
 }
 
+// ---------- 简介：默认只显示 5 行，可展开 ----------
+const DESC_TX = {
+  kk: ['Толығырақ', 'Жасыру'],
+  ru: ['Развернуть', 'Свернуть'],
+  zh: ['展开', '收起'],
+  en: ['Show more', 'Show less']
+};
+function descBlock(text, tag) {
+  const tx = DESC_TX[getLang()] || DESC_TX.kk;
+  const p = h('p', { class: 'bk-desc', lang: tag, dir: 'auto' }, text);
+  const btn = h('button', {
+    type: 'button', hidden: true,
+    style: 'background:none;border:0;padding:6px 0;color:#2e6f5e;font:inherit;font-weight:600;cursor:pointer'
+  }, tx[0]);
+  let open = false;
+  const collapse = () => {
+    p.style.display = '-webkit-box';
+    p.style.webkitBoxOrient = 'vertical';
+    p.style.webkitLineClamp = '5';
+    p.style.overflow = 'hidden';
+  };
+  const expand = () => {
+    p.style.display = '';
+    p.style.webkitBoxOrient = '';
+    p.style.webkitLineClamp = '';
+    p.style.overflow = '';
+    p.style.webkitMaskImage = '';
+    p.style.maskImage = '';
+  };
+  const check = () => {
+    if (open) { btn.hidden = false; return; }
+    const cut = p.scrollHeight > p.clientHeight + 1;
+    btn.hidden = !cut;
+    const mask = cut ? 'linear-gradient(#000 65%, transparent)' : '';
+    p.style.webkitMaskImage = mask;
+    p.style.maskImage = mask;
+  };
+  btn.addEventListener('click', () => {
+    open = !open;
+    btn.textContent = tx[open ? 1 : 0];
+    if (open) expand(); else collapse();
+    check();
+  });
+  collapse();
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(check).observe(p);
+  else setTimeout(check, 300);
+  return h('div', { dir: 'auto' }, p, btn);
+}
+
 function bookDetail(book, chapters, cats) {
   const tag = langTag(book);
   const cat = cats.find((c) => c.id === book.category_id);
@@ -375,7 +424,7 @@ function bookDetail(book, chapters, cats) {
     h('div', { class: 'bk-actions' }, startEl, shelfBtn, status),
     resume ? h('div', { class: 'bk-meta' }, t('book.progress', { n: resume.chapter_number, p: Math.round(progress.ratio * 100) })) : null,
     target ? null : h('p', { class: 'bad' }, t('book.nochapters')),
-    book.description ? h('p', { class: 'bk-desc', lang: tag, dir: 'auto' }, book.description) : null,
+    book.description ? descBlock(book.description, tag) : null,
     showCopyright ? h('div', { class: 'bk-meta' }, t('book.copyright') + ': ', h('span', { dir: 'auto' }, book.copyright_note)) : null);
 
   const toc = chapters.length
