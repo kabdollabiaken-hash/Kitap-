@@ -3,6 +3,7 @@ import { t, getLang, setLang, LANGS } from './i18n.js';
 import { storage } from './storage.js';
 import { h, enc } from './ui.js';
 import { getBooksByIds } from './api-extra.js';
+import { getChapterList } from './api.js';
 import { getSession, login, signOut, sync, takeAuthError } from './auth.js';
 import { isStandalone, isIOS, canPrompt, promptInstall, onInstallChange } from './pwa.js';
 import { openNotes } from './notes.js';
@@ -119,24 +120,48 @@ function badgePoints(tier) {
   return pts.join(' ');
 }
 
-function badgeSvg(tier, colors, num, earned, size) {
+const RIM = [
+  ['#f1cfae', '#a8693a', '#e6b88f'], // 铜
+  ['#f1cfae', '#a8693a', '#e6b88f'],
+  ['#ffffff', '#9aa3ad', '#e7ebef'], // 银
+  ['#ffffff', '#9aa3ad', '#e7ebef'],
+  ['#fff3b8', '#c4932f', '#f7da7c'], // 金
+  ['#fffbe0', '#d6a73a', '#fff0a0'] // 亮金
+];
+const BADGE_ICON = {
+  time: '<circle cx="50" cy="72" r="8.5" fill="none" stroke="#fff" stroke-width="2.3"/><path d="M50 67v5.5l3.6 2.2" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>',
+  books: '<path d="M39 65c4-2 7.5-2 11 1 3.5-3 7-3 11-1v12c-4-2-7.500-2-11 1-3.500-3-7-3-11-1z M50 66v12" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+  fin: '<path d="M41 72.500l6 6 12-12.500" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>',
+  days: '<rect x="41" y="64" width="18" height="15" rx="3" fill="none" stroke="#fff" stroke-width="2.2"/><path d="M41 69.500h18M46 62v4M54 62v4" stroke="#fff" stroke-width="2.200" stroke-linecap="round"/>',
+  streak: '<path d="M50 63c3 4.500 7.500 7.500 7.500 13a7.500 7.500 0 0 1-15 0c0-3 1.800-4.800 3-6.500 1 1.800 1.800 2.800 2.800 2.800 0-3.800-1-6.500 1.700-9.300z" fill="#fff" fill-opacity=".92"/>'
+};
+
+function badgeSvg(tier, colors, num, earned, size, cat) {
   const id = 'bg' + (++badgeUid);
   const pts = badgePoints(tier);
+  const rim = earned ? RIM[Math.min(5, Math.max(0, tier))] : ['#e4e7eb', '#b5bbc4', '#d4d8de'];
   const shape = pts
     ? '<polygon points="' + pts + '" stroke-linejoin="round"'
     : '<circle cx="50" cy="50" r="46"';
-  const fill = earned ? 'url(#' + id + ')' : 'rgba(128,128,128,.14)';
-  const stroke = earned ? '#d9b45a' : 'rgba(128,128,128,.45)';
-  const shapeEl = shape + ' fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + (earned ? 3 : 2) + '"/>';
-  const grad = earned
-    ? '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + colors[0] + '"/><stop offset="1" stop-color="' + colors[1] + '"/></linearGradient></defs>'
+  const fill = earned ? 'url(#' + id + 'b)' : 'rgba(128,128,128,.14)';
+  const stroke = earned ? 'url(#' + id + 'r)' : 'rgba(128,128,128,.45)';
+  const shapeEl = shape + ' fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + (earned ? 5 : 2) + '"/>';
+  const defs = earned
+    ? '<defs>' +
+      '<linearGradient id="' + id + 'b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + colors[0] + '"/><stop offset="1" stop-color="' + colors[1] + '"/></linearGradient>' +
+      '<linearGradient id="' + id + 'r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="' + rim[0] + '"/><stop offset=".5" stop-color="' + rim[1] + '"/><stop offset="1" stop-color="' + rim[2] + '"/></linearGradient>' +
+      '<linearGradient id="' + id + 'h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>' +
+      '<clipPath id="' + id + 'c">' + (pts ? '<polygon points="' + pts + '"/>' : '<circle cx="50" cy="50" r="46"/>') + '</clipPath>' +
+      '</defs>'
     : '';
-  const shine = earned ? '<ellipse cx="38" cy="30" rx="22" ry="10" fill="#fff" opacity=".22"/>' : '';
+  const shine = earned ? '<g clip-path="url(#' + id + 'c)"><ellipse cx="50" cy="20" rx="44" ry="26" fill="url(#' + id + 'h)"/></g>' : '';
   const s = String(num);
-  const fs = s.length >= 4 ? 24 : s.length === 3 ? 28 : 34;
-  const txt = '<text x="50" y="60" text-anchor="middle" font-size="' + fs + '" font-weight="800" font-family="system-ui,sans-serif" fill="' + (earned ? '#fff' : 'rgba(128,128,128,.7)') + '"' + (earned ? ' stroke="rgba(0,0,0,.18)" stroke-width="1" paint-order="stroke"' : '') + '>' + s + '</text>';
+  const fs = s.length >= 4 ? 21 : s.length === 3 ? 25 : 31;
+  const txt = '<text x="50" y="' + (cat ? 54 : 60) + '" text-anchor="middle" font-size="' + fs + '" font-weight="800" font-family="system-ui,sans-serif" fill="' + (earned ? '#fff' : 'rgba(128,128,128,.7)') + '"' + (earned ? ' stroke="rgba(0,0,0,.2)" stroke-width="1.2" paint-order="stroke"' : '') + '>' + s + '</text>';
+  const icon = cat && BADGE_ICON[cat] ? '<g' + (earned ? '' : ' opacity=".45"') + '>' + BADGE_ICON[cat].replace(/#fff/g, earned ? '#fff' : '#9aa0a8') + '</g>' : '';
   const px = size || 68;
-  return '<svg width="' + px + '" height="' + px + '" viewBox="0 0 100 100">' + grad + shapeEl + shine + txt + '</svg>';
+  const drop = earned ? ' style="filter:drop-shadow(0 3px 5px rgba(0,0,0,.25))"' : '';
+  return '<svg width="' + px + '" height="' + px + '" viewBox="0 0 100 100"' + drop + '>' + defs + shapeEl + shine + txt + icon + '</svg>';
 }
 
 function ensureBadgeStyle() {
@@ -222,14 +247,25 @@ export function viewLogin(rerender) {
 }
 
 // ---------- “我”页 ----------
-// 读完的书：按进度记录里的常见字段尽力判断。
-// 如果你的进度数据结构不同，只需要改 isFinished 这一个函数。
-function isFinished(v) {
-  if (!v || typeof v !== 'object') return false;
-  if (v.done || v.finished || v.completed) return true;
-  const p = v.percent ?? v.pct ?? v.progress ?? v.ratio;
-  if (typeof p === 'number') return p >= 0.98 || p >= 98;
-  return false;
+// 读完的书：读到最后一章的末尾才算。要联网核对章节列表，结果记在本机，只增不减
+const FIN_KEY = 'kitap:badges:fin';
+function finishedCached() {
+  try { return Number(localStorage.getItem(FIN_KEY)) || 0; } catch (e) { return 0; }
+}
+async function refreshFinished() {
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem('kitap:v1:progress') || '{}') || {}; } catch (e) { /* ignore */ }
+  let n = 0;
+  for (const [bookId, p] of Object.entries(all)) {
+    if (!p || !(p.ratio >= 0.98)) continue;
+    try {
+      const chapters = await getChapterList(bookId);
+      if (chapters && chapters.length && chapters[chapters.length - 1].id === p.chapterId) n++;
+    } catch (e) { /* 没网络时这一本先不算 */ }
+  }
+  const best = Math.max(finishedCached(), n);
+  try { localStorage.setItem(FIN_KEY, String(best)); } catch (e) { /* ignore */ }
+  return best;
 }
 
 // 历史最长连续阅读天数（勋章一旦获得不会因为断签而消失）
@@ -262,13 +298,9 @@ function stats() {
     week.push({ v, dow: x.getDay(), today: i === 0 });
     weekTotal += v;
   }
-  let reading = 0; let finished = 0;
-  try {
-    const prog = JSON.parse(localStorage.getItem('kitap:v1:progress') || '{}');
-    const vals = Object.values(prog);
-    reading = vals.length;
-    finished = vals.filter(isFinished).length;
-  } catch (e) { /* ignore */ }
+  let reading = 0;
+  try { reading = Object.keys(JSON.parse(localStorage.getItem('kitap:v1:progress') || '{}')).length; } catch (e) { /* ignore */ }
+  const finished = finishedCached();
   return {
     total, days, streak, week, weekTotal, reading, finished,
     bestStreak: Math.max(streak, longestStreak(map)),
@@ -343,7 +375,7 @@ function openBadges(st) {
       }
       return h('div', { class: 'bd-cell' + (earned ? '' : ' off') },
         pill,
-        svg(badgeSvg(i, cat.color, n, earned)),
+        svg(badgeSvg(i, cat.color, n, earned, 68, cat.key)),
         h('div', { class: 'bd-lb' }, tx.reach(n, unit)));
     });
     return h('div', { class: 'bd-cat' },
@@ -374,7 +406,7 @@ function badgesCard(st) {
   const prev = h('div', { class: 'bd-prev' }, items.map((it) => {
     const n = it.cat.tiers[it.i];
     return h('div', { class: 'bd-pv' + (it.earned ? '' : ' off') },
-      svg(badgeSvg(it.i, it.cat.color, n, it.earned, 60)),
+      svg(badgeSvg(it.i, it.cat.color, n, it.earned, 60, it.cat.key)),
       h('div', { class: 'bd-lb' }, tx.cat[it.cat.key]));
   }));
   const open = () => openBadges(st);
@@ -419,7 +451,10 @@ export function viewMe({ cover }) {
   const grid = h('section', { class: 'me-grid' },
     cell(st.reading, 'me.reading'), cell(st.shelf, 'me.onshelf'), cell(st.days, 'me.days'), cell(st.streak, 'me.streak'));
 
-  const badges = badgesCard(st);
+  let badges = badgesCard(st);
+  refreshFinished().then((n) => {
+    if (n !== st.finished && badges.isConnected) { st.finished = n; const nb = badgesCard(st); badges.replaceWith(nb); badges = nb; }
+  }).catch(() => {});
 
   const recent = storage.getRecent().slice(0, 5);
   const recentBox = h('section', { class: 'me-card' }, h('h2', { class: 'me-h2' }, t('me.recent')));
