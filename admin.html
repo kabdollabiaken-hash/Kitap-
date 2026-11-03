@@ -112,12 +112,13 @@ function renderMain() {
     h('button', { class: tab === 'books' ? '' : 'ghost', onclick: () => { tab = 'books'; renderMain(); } }, '书籍管理'),
     h('button', { class: tab === 'upload' ? '' : 'ghost', onclick: () => { tab = 'upload'; renderMain(); } }, '上传新书'),
     h('button', { class: tab === 'cats' ? '' : 'ghost', onclick: () => { tab = 'cats'; renderMain(); } }, '分类'),
-    h('button', { class: tab === 'typos' ? '' : 'ghost', onclick: () => { tab = 'typos'; renderMain(); } }, '纠错'));
+    h('button', { class: tab === 'typos' ? '' : 'ghost', onclick: () => { tab = 'typos'; renderMain(); } }, '纠错'),
+    h('button', { class: tab === 'users' ? '' : 'ghost', onclick: () => { tab = 'users'; renderMain(); } }, '用户'));
   const body = h('div');
   root.replaceChildren(
     h('div', { class: 'top' }, h('h1', {}, '管理后台'), h('button', { class: 'ghost', onclick: logout }, '退出')),
     tabs, body);
-  if (tab === 'books') viewBooks(body); else if (tab === 'cats') viewCats(body); else if (tab === 'typos') viewTypos(body); else viewUpload(body);
+  if (tab === 'books') viewBooks(body); else if (tab === 'cats') viewCats(body); else if (tab === 'typos') viewTypos(body); else if (tab === 'users') viewUsers(body); else viewUpload(body);
 }
 
 // ---------- 分类管理 ----------
@@ -243,6 +244,27 @@ async function viewTypos(box) {
 
   box.replaceChildren(h('p', { class: 'muted' }, '读者在阅读页选中错字后提交的反馈。“采纳并修改”会自动改这一章正文并重新校验；改不了的会提示原因，到“书籍管理 → 章节”里手动改。'), bar, msg, listEl);
   load();
+}
+
+// ---------- 用户统计 ----------
+async function viewUsers(box) {
+  box.replaceChildren(h('p', { class: 'muted' }, '加载中…'));
+  try {
+    const s = await api('user_stats');
+    const cell = (n, label) => h('div', { class: 'card' },
+      h('div', { style: 'font-size:26px;font-weight:600' }, String(n)),
+      h('div', { class: 'muted' }, label));
+    box.replaceChildren(
+      cell(s.total, '注册总数'),
+      cell(s.d1, '近 24 小时新增'),
+      cell(s.d7, '近 7 天新增'),
+      cell(s.d30, '近 30 天新增'),
+      cell(s.active7, '近 7 天登录过的人'),
+      h('h2', {}, '最近注册'),
+      s.recent.length ? s.recent.map((u) => h('div', { class: 'card' },
+        h('div', {}, u.email + (u.provider ? '  ·  ' + u.provider : '')),
+        h('div', { class: 'muted' }, new Date(u.created_at).toLocaleString()))) : h('p', { class: 'muted' }, '还没有人注册'));
+  } catch (e) { box.replaceChildren(h('p', { class: 'err' }, e.message)); }
 }
 
 const STATUS = { published: '已上架', hidden: '已下架', draft: '草稿' };
