@@ -442,6 +442,36 @@ const actions = {
     return { ok: true };
   },
 
+  // ---- 用户统计（Supabase 登录用户）----
+  async user_stats() {
+    const { key, base } = storageEnv();
+    const sh = { apikey: key };
+    if (key.startsWith('eyJ')) sh.Authorization = 'Bearer ' + key;
+    const DAY = 86400000;
+    const now = Date.now();
+    const mask = (e) => { const [a, b] = String(e || '').split('@'); return b ? a.slice(0, 2) + '***@' + b : '—'; };
+    let total = 0; let d1 = 0; let d7 = 0; let d30 = 0; let active7 = 0;
+    const recent = [];
+    for (let page = 1; page <= 20; page++) {
+      const r = await fetch(base + '/auth/v1/admin/users?page=' + page + '&per_page=1000', { headers: sh });
+      if (!r.ok) throw new HttpError(500, '读取用户失败 ' + r.status + '：' + (await r.text()).slice(0, 200));
+      const j = await r.json();
+      const users = Array.isArray(j) ? j : (j.users || []);
+      for (const u of users) {
+        total++;
+        const age = now - Date.parse(u.created_at);
+        if (age < DAY) d1++;
+        if (age < 7 * DAY) d7++;
+        if (age < 30 * DAY) d30++;
+        if (u.last_sign_in_at && now - Date.parse(u.last_sign_in_at) < 7 * DAY) active7++;
+        recent.push({ created_at: u.created_at, email: mask(u.email), provider: (u.app_metadata && u.app_metadata.provider) || '' });
+      }
+      if (users.length < 1000) break;
+    }
+    recent.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+    return { total, d1, d7, d30, active7, recent: recent.slice(0, 15) };
+  },
+
   async finalize({ book_id, expected, book, publish }) {
     needId(book_id);
     const b = await bookStatus(book_id);
