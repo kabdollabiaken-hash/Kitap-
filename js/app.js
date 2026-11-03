@@ -515,7 +515,7 @@ function viewShelf() {
         }, t('shelf.remove', { n: selected.size })))
       : null;
 
-    root.replaceChildren(head, body, bar);
+    root.replaceChildren(...[head, body, bar].filter(Boolean)); // 原生方法遇到 null 会写出文字 "null"
   };
 
   draw();
