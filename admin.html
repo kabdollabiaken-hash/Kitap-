@@ -246,25 +246,47 @@ async function viewTypos(box) {
   load();
 }
 
-// ---------- 用户统计 ----------
+// ---------- 用户：统计、列表、屏蔽 ----------
 async function viewUsers(box) {
   box.replaceChildren(h('p', { class: 'muted' }, '加载中…'));
-  try {
-    const s = await api('user_stats');
-    const cell = (n, label) => h('div', { class: 'card' },
-      h('div', { style: 'font-size:26px;font-weight:600' }, String(n)),
-      h('div', { class: 'muted' }, label));
-    box.replaceChildren(
-      cell(s.total, '注册总数'),
-      cell(s.d1, '近 24 小时新增'),
-      cell(s.d7, '近 7 天新增'),
-      cell(s.d30, '近 30 天新增'),
-      cell(s.active7, '近 7 天登录过的人'),
-      h('h2', {}, '最近注册'),
-      s.recent.length ? s.recent.map((u) => h('div', { class: 'card' },
-        h('div', {}, u.email + (u.provider ? '  ·  ' + u.provider : '')),
-        h('div', { class: 'muted' }, new Date(u.created_at).toLocaleString()))) : h('p', { class: 'muted' }, '还没有人注册'));
-  } catch (e) { box.replaceChildren(h('p', { class: 'err' }, e.message)); }
+  let s;
+  try { s = await api('user_stats'); } catch (e) { box.replaceChildren(h('p', { class: 'err' }, e.message)); return; }
+  const cell = (n, label) => h('div', { class: 'card' },
+    h('div', { style: 'font-size:26px;font-weight:600' }, String(n)),
+    h('div', { class: 'muted' }, label));
+  const q = h('input', { type: 'search', placeholder: '按邮箱或名字搜索', autocomplete: 'off' });
+  const list = h('div');
+  const fmt = (t) => (t ? new Date(t).toLocaleString() : '—');
+  const card = (u) => {
+    const msg = h('div', { class: 'muted' });
+    const btn = h('button', { class: u.banned ? 'ghost' : 'danger', type: 'button' }, u.banned ? '解除屏蔽' : '屏蔽');
+    btn.addEventListener('click', async () => {
+      if (!u.banned && !confirm('确定屏蔽 ' + (u.email || u.id) + ' 吗？\n屏蔽后他无法再登录，已登录的设备最多 1 小时后也会被踢出。')) return;
+      btn.disabled = true;
+      try { await api('user_ban', { id: u.id, ban: !u.banned }); u.banned = !u.banned; draw(); } catch (e) { msg.className = 'err'; msg.textContent = e.message; btn.disabled = false; }
+    });
+    return h('div', { class: 'card' },
+      h('div', { dir: 'auto', style: 'font-weight:600;word-break:break-all' }, u.email || '（没有邮箱）', ' ', u.banned ? h('span', { class: 'badge hidden' }, '已屏蔽') : null),
+      u.name ? h('div', { class: 'muted', dir: 'auto' }, u.name) : null,
+      h('div', { class: 'muted' }, '注册：' + fmt(u.created_at) + (u.provider ? ' · ' + u.provider : '')),
+      h('div', { class: 'muted' }, '最近登录：' + fmt(u.last_sign_in_at)),
+      h('div', { class: 'row' }, btn), msg);
+  };
+  const draw = () => {
+    const k = q.value.trim().toLowerCase();
+    const rows = s.users.filter((u) => !k || (u.email + ' ' + u.name).toLowerCase().includes(k));
+    list.replaceChildren(...(rows.length ? rows.map(card) : [h('p', { class: 'muted' }, s.users.length ? '没有找到' : '还没有人注册')]));
+  };
+  q.addEventListener('input', draw);
+  draw();
+  box.replaceChildren(
+    cell(s.total, '注册总数'),
+    cell(s.d1, '近 24 小时新增'),
+    cell(s.d7, '近 7 天新增'),
+    cell(s.d30, '近 30 天新增'),
+    cell(s.active7, '近 7 天登录过的人'),
+    h('h2', {}, '所有用户' + (s.total > s.users.length ? '（只显示最新 ' + s.users.length + ' 个）' : '')),
+    q, list);
 }
 
 const STATUS = { published: '已上架', hidden: '已下架', draft: '草稿' };
