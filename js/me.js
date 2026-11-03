@@ -21,6 +21,66 @@ function svg(html) { const s = document.createElement('span'); s.setAttribute('a
 const GOOGLE_G = '<svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>';
 const LOGO = '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5C4 4.7 4.7 4 5.5 4H11v16H5.5C4.7 20 4 19.3 4 18.5z"/><path d="M20 5.5C20 4.7 19.3 4 18.5 4H13v16h5.5c.8 0 1.5-.7 1.5-1.5z"/></svg>';
 
+// ---------- 反馈邮箱 / 版本 ----------
+const FEEDBACK_EMAIL = 'kapkaz595@gmail.com'; // 在这里填你的反馈邮箱，例如 'name@gmail.com'；留空则不显示“反馈”按钮
+const APP_VERSION = '1.0';
+
+const ME_TX = {
+  kk: {
+    feedback: 'Кері байланыс', about: 'Қолданба туралы', close: 'Жабу', installed: 'Орнатылған',
+    version: 'Нұсқа', copyright: 'Авторлық құқық', privacy: 'Құпиялылық',
+    copyrightText: 'Кітаптардың авторлық құқығы авторларға және құқық иелеріне тиесілі. Әр кітаптың құқық көзі кітап бетінде көрсетілген.',
+    privacyText: 'Сөре, оқу барысы, оқу уақыты және баптаулар осы құрылғыда сақталады, ал кірген соң Google аккаунтыңызбен бұлтқа синхрондалады. Біз тек кіру үшін Google поштаңыз бен атыңызды сақтаймыз.'
+  },
+  ru: {
+    feedback: 'Обратная связь', about: 'О приложении', close: 'Закрыть', installed: 'Установлено',
+    version: 'Версия', copyright: 'Авторские права', privacy: 'Конфиденциальность',
+    copyrightText: 'Авторские права на книги принадлежат авторам и правообладателям. Источник прав для каждой книги указан на её странице.',
+    privacyText: 'Полка, прогресс чтения, время чтения и настройки хранятся на этом устройстве, а после входа синхронизируются с вашим аккаунтом Google в облаке. Мы храним только вашу почту и имя из Google, нужные для входа.'
+  },
+  zh: {
+    feedback: '反馈', about: '关于', close: '关闭', installed: '已安装',
+    version: '版本', copyright: '版权', privacy: '隐私',
+    copyrightText: '书籍的版权归原作者和版权方所有。每本书的版权来源显示在书籍详情页。',
+    privacyText: '书架、阅读进度、阅读时长和偏好保存在本机，登录后会同步到你的谷歌账号对应的云端。我们只保存登录用的谷歌邮箱和昵称。'
+  },
+  en: {
+    feedback: 'Feedback', about: 'About', close: 'Close', installed: 'Installed',
+    version: 'Version', copyright: 'Copyright', privacy: 'Privacy',
+    copyrightText: 'Book copyrights belong to the authors and rights holders. The source of rights for each book is shown on its page.',
+    privacyText: 'Your shelf, reading progress, reading time and settings are stored on this device and, once you sign in, synced to the cloud under your Google account. We only keep the Google email and name used for sign-in.'
+  }
+};
+const mx = () => ME_TX[getLang()] || ME_TX.kk;
+
+function openFeedback() {
+  if (!FEEDBACK_EMAIL) return;
+  const subject = 'Shuhyla ' + APP_VERSION;
+  const body = '\n\n---\nShuhyla ' + APP_VERSION + ' · ' + getLang();
+  location.href = 'mailto:' + FEEDBACK_EMAIL + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+}
+
+function openAbout() {
+  const tx = mx();
+  const close = () => ov.remove();
+  const sec = (title, text) => h('div', { style: 'margin-top:16px' },
+    h('div', { style: 'font-weight:600;margin-bottom:4px' }, title),
+    h('div', { style: 'color:#555', dir: 'auto' }, text));
+  const ov = h('div', {
+    role: 'dialog', 'aria-modal': 'true',
+    style: 'position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center',
+    onclick: (e) => { if (e.target === ov) close(); }
+  },
+  h('div', { style: 'background:#fff;color:#222;width:100%;max-width:560px;max-height:85vh;overflow:auto;border-radius:20px 20px 0 0;padding:20px 20px calc(28px + env(safe-area-inset-bottom));line-height:1.6' },
+    h('div', { style: 'display:flex;justify-content:space-between;align-items:center' },
+      h('strong', { style: 'font-size:18px' }, tx.about),
+      h('button', { type: 'button', 'aria-label': tx.close, onclick: close, style: 'background:none;border:0;font-size:20px;padding:6px 10px;cursor:pointer;color:inherit' }, '✕')),
+    sec(t('brand'), tx.version + ' ' + APP_VERSION),
+    sec(tx.copyright, tx.copyrightText),
+    sec(tx.privacy, tx.privacyText)));
+  document.body.append(ov);
+}
+
 function langChips(rerender) {
   return h('div', { class: 'me-langs', role: 'group', 'aria-label': t('lang.label') },
     LANGS.map((l) => h('button', {
@@ -139,22 +199,27 @@ export function viewMe({ cover }) {
   const installBox = h('div', { class: 'me-install' });
   const drawInstall = () => {
     installBox.replaceChildren();
-    if (isStandalone()) return;
-    if (canPrompt()) {
-      installBox.append(h('button', { class: 'me-btn', type: 'button', onclick: async () => { await promptInstall(); drawInstall(); } }, t('me.install')));
-    } else if (isIOS()) {
-      installBox.append(h('p', { class: 'me-hint' }, t('me.install.ios')));
-    } else {
-      installBox.append(h('p', { class: 'me-hint' }, t('me.install.menu')));
+    if (isStandalone()) {
+      installBox.append(h('button', { class: 'me-btn', type: 'button', disabled: true }, mx().installed));
+      return;
     }
+    const hint = h('p', { class: 'me-hint', hidden: true });
+    installBox.append(
+      h('button', {
+        class: 'me-btn', type: 'button',
+        onclick: async () => {
+          if (canPrompt()) { await promptInstall(); drawInstall(); return; }
+          hint.textContent = t(isIOS() ? 'me.install.ios' : 'me.install.menu');
+          hint.hidden = false;
+        }
+      }, t('me.install')),
+      hint);
   };
   drawInstall();
   onInstallChange(drawInstall);
 
   const settings = h('section', { class: 'me-card' },
     h('h2', { class: 'me-h2' }, t('me.settings')),
-    h('div', { class: 'me-label' }, t('lang.label')),
-    langChips(() => { window.dispatchEvent(new HashChangeEvent('hashchange')); }),
     h('div', { class: 'me-acts' }, syncBtn, outBtn), msg,
     h('div', { class: 'me-label', style: 'margin-top:16px' }, t('me.install.title')), installBox);
 
@@ -163,5 +228,12 @@ export function viewMe({ cover }) {
   h('span', { class: 'me-link-t' }, t('notes.title')),
   h('span', { class: 'me-link-a', 'aria-hidden': 'true' }, '›'));
 
-return h('div', { class: 'me' }, head, timeCard, grid, notesRow, recentBox, settings);
+  const linkRow = (icon, label, onclick) => h('button', { class: 'me-link', type: 'button', onclick },
+    h('span', { class: 'me-link-i', 'aria-hidden': 'true' }, icon),
+    h('span', { class: 'me-link-t' }, label),
+    h('span', { class: 'me-link-a', 'aria-hidden': 'true' }, '›'));
+  const feedbackRow = FEEDBACK_EMAIL ? linkRow('✉', mx().feedback, openFeedback) : null;
+  const aboutRow = linkRow('ⓘ', mx().about, openAbout);
+
+  return h('div', { class: 'me' }, head, timeCard, grid, notesRow, recentBox, settings, feedbackRow, aboutRow);
 }
