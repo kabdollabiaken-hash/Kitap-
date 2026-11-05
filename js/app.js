@@ -387,7 +387,7 @@ const MORE_TX = {
 };
 async function fetchBooks(params) {
   const url = new URL(SUPABASE_URL + '/rest/v1/books');
-  url.searchParams.set('select', 'id,title,author,cover_url,language,script');
+  url.searchParams.set('select', 'id,title,author,cover_url,language,script,series_no');
   url.searchParams.set('status', 'eq.published');
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   const r = await fetch(url, { headers: { apikey: SUPABASE_KEY } });
@@ -404,6 +404,29 @@ function bookRow(items) {
       return card;
     }));
 }
+// 丛书：同一套书按册数排列，当前这本高亮
+const SERIES_TX = { kk: 'Топтама', ru: 'Серия', zh: '丛书', en: 'Series' };
+function seriesSection(book) {
+  const tx = SERIES_TX[getLang()] || SERIES_TX.kk;
+  const box = h('div');
+  const sec = section(tx, box);
+  loadInto(box, async () => {
+    // 先单独查这本书的丛书名（不依赖 api.js 返回的字段）
+    const me = (await fetchBooks({ id: 'eq.' + book.id, select: 'id,series' }))[0];
+    if (!me || !me.series) { sec.remove(); return null; }
+    sec.querySelector('h2').textContent = tx + ': ' + me.series;
+    const items = await fetchBooks({ series: 'eq.' + me.series, order: 'series_no.asc.nullslast,title.asc', limit: '60' });
+    if (items.length < 2) { sec.remove(); return null; }
+    const row = bookRow(items);
+    [...row.children].forEach((a, i) => {
+      if (items[i].id === book.id) { a.style.outline = '2px solid #2e6f5e'; a.style.borderRadius = '8px'; }
+      if (items[i].series_no != null) a.prepend(h('div', { class: 'muted', style: 'font-size:12px;margin-bottom:2px' }, '#' + items[i].series_no));
+    });
+    return row;
+  });
+  return sec;
+}
+
 function moreSections(book) {
   const tx = MORE_TX[getLang()] || MORE_TX.kk;
   const seen = new Set([book.id]);
@@ -494,6 +517,7 @@ function bookDetail(book, chapters, cats) {
   return h('div', {},
     h('div', { class: 'bk' }, h('div', { class: 'bk-cover' }, cover(book)), info),
     toc,
+    seriesSection(book),
     moreSections(book));
 }
 
