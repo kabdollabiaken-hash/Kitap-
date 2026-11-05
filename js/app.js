@@ -246,7 +246,7 @@ function continueSection() {
 
 function viewHome() {
   const cont = continueSection();
-  const root = h('div', {}, h('h1', { class: cont ? 'sr-only' : null }, t('home.title')), cont);
+  const root = h('div', {}, h('h1', { class: cont ? 'sr-only' : null }, t('home.title')), cont, followSection());
 
   const catBox = h('div');
   root.append(section(t('home.categories'), catBox));
@@ -404,6 +404,131 @@ function bookRow(items) {
       return card;
     }));
 }
+// ---------- 书内搜索 ----------
+const SEARCH_TX = {
+  kk: { title: 'Кітаптан іздеу', ph: 'Сөз немесе сөйлем', go: 'Іздеу', none: 'Ештеңе табылмады', min: 'Кемінде 2 таңба енгізіңіз', err: 'Іздеу сәтсіз болды, кейінірек қайталаңыз', more: 'Нәтиже көп, алғашқылары ғана көрсетілді' },
+  ru: { title: 'Поиск по книге', ph: 'Слово или фраза', go: 'Найти', none: 'Ничего не найдено', min: 'Введите минимум 2 символа', err: 'Ошибка поиска, повторите позже', more: 'Результатов много, показаны первые' },
+  zh: { title: '在书中搜索', ph: '输入词或句子', go: '搜索', none: '没有找到', min: '至少输入 2 个字', err: '搜索失败，请稍后再试', more: '结果较多，只显示前面部分' },
+  en: { title: 'Search in this book', ph: 'Word or phrase', go: 'Search', none: 'No results', min: 'Enter at least 2 characters', err: 'Search failed, try again later', more: 'Many results, showing the first ones' }
+};
+function snippetNodes(text, q) {
+  const at = text.toLowerCase().indexOf(q.toLowerCase());
+  if (at < 0) return [text];
+  return [text.slice(0, at), h('mark', { style: 'background:#ffe08a;color:#000;border-radius:3px;padding:0 1px' }, text.slice(at, at + q.length)), text.slice(at + q.length)];
+}
+function searchBox(book) {
+  const tx = SEARCH_TX[getLang()] || SEARCH_TX.kk;
+  const tag = langTag(book);
+  const input = h('input', {
+    type: 'search', placeholder: tx.ph, 'aria-label': tx.title, dir: 'auto', autocomplete: 'off',
+    style: 'flex:1;min-width:0;padding:10px 12px;border:1px solid rgba(128,128,128,.4);border-radius:10px;font:inherit;background:transparent;color:inherit'
+  });
+  const out = h('div', { style: 'margin-top:6px' });
+  let token = 0;
+  const run = async (e) => {
+    e.preventDefault();
+    const q = input.value.trim();
+    const my = ++token;
+    if (q.length < 2) { out.replaceChildren(h('p', { class: 'muted' }, tx.min)); return; }
+    out.replaceChildren(h('p', { class: 'muted' }, '…'));
+    try {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/search_book', {
+        method: 'POST',
+        headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_book: book.id, p_q: q })
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const rows = await r.json();
+      if (my !== token) return;
+      if (!rows.length) { out.replaceChildren(h('p', { class: 'muted' }, tx.none)); return; }
+      out.replaceChildren(...rows.map((x) => h('a', {
+        href: '#/read/' + enc(book.id) + '/' + enc(x.chapter_id) + '?s=' + x.pos + '&q=' + enc(q),
+        style: 'display:block;padding:10px 0;border-bottom:1px solid rgba(128,128,128,.25);text-decoration:none;color:inherit'
+      },
+      h('div', { class: 'muted', style: 'font-size:13px', dir: 'auto' }, x.chapter_number + '. ' + x.title),
+      h('div', { lang: tag, dir: 'auto' }, snippetNodes(x.snippet, q)))).concat(rows.length >= 60 ? [h('p', { class: 'muted' }, tx.more)] : []));
+    } catch (err) {
+      if (my === token) out.replaceChildren(h('p', { class: 'bad' }, tx.err));
+    }
+  };
+  return h('div', {}, h('form', { style: 'display:flex;gap:8px', onsubmit: run }, input, h('button', { class: 'btn', type: 'submit' }, tx.go)), out);
+}
+
+// ---------- 关注作者 / 丛书：有新书时在首页提示（关注记录存在本机）----------
+const FOLLOW_KEY = 'kitap:follows:v1';
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+function readFollows() {
+  try {
+    const j = JSON.parse(localStorage.getItem(FOLLOW_KEY) || 'null');
+    if (j && typeof j === 'object') return { authors: j.authors || {}, series: j.series || {}, seen: Array.isArray(j.seen) ? j.seen : [] };
+  } catch (e) { /* ignore */ }
+  return { authors: {}, series: {}, seen: [] };
+}
+function writeFollows(f) {
+  try { f.seen = f.seen.slice(-300); localStorage.setItem(FOLLOW_KEY, JSON.stringify(f)); } catch (e) { /* ignore */ }
+}
+function markSeen(ids) {
+  const f = readFollows();
+  for (const id of ids) if (!f.seen.includes(id)) f.seen.push(id);
+  writeFollows(f);
+}
+const FOLLOW_TX = {
+  kk: { author: '+ Авторды бақылау', series: '+ Топтаманы бақылау', on: 'Бақылауда ✓', title: 'Бақылаудағы жаңа кітаптар', dismiss: 'Түсінікті' },
+  ru: { author: '+ Следить за автором', series: '+ Следить за серией', on: 'Вы следите ✓', title: 'Новые книги из ваших подписок', dismiss: 'Понятно' },
+  zh: { author: '+ 关注作者', series: '+ 关注丛书', on: '已关注 ✓', title: '关注的新书', dismiss: '知道了' },
+  en: { author: '+ Follow author', series: '+ Follow series', on: 'Following ✓', title: 'New from your follows', dismiss: 'Got it' }
+};
+function followBtn(kind, name) {
+  const tx = FOLLOW_TX[getLang()] || FOLLOW_TX.kk;
+  const btn = h('button', { class: 'btn ghost', type: 'button', style: 'padding:4px 10px;font-size:13px' });
+  const paint = () => {
+    const on = has(readFollows()[kind], name);
+    btn.textContent = on ? tx.on : (kind === 'authors' ? tx.author : tx.series);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  };
+  btn.addEventListener('click', () => {
+    const f = readFollows();
+    if (has(f[kind], name)) delete f[kind][name]; else f[kind][name] = Date.now();
+    writeFollows(f);
+    paint();
+  });
+  paint();
+  return btn;
+}
+function followSection() {
+  const f = readFollows();
+  const an = Object.keys(f.authors);
+  const sn = Object.keys(f.series);
+  if (!an.length && !sn.length) return null;
+  const tx = FOLLOW_TX[getLang()] || FOLLOW_TX.kk;
+  const box = h('div');
+  const sec = section(tx.title, box);
+  loadInto(box, async () => {
+    const q = (v) => '"' + String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+    const parts = [];
+    if (an.length) parts.push('author.in.(' + an.map(q).join(',') + ')');
+    if (sn.length) parts.push('series.in.(' + sn.map(q).join(',') + ')');
+    const min = Math.min(...an.map((k) => f.authors[k]), ...sn.map((k) => f.series[k]));
+    const rows = await fetchBooks({
+      select: 'id,title,author,cover_url,language,script,series,series_no,published_at',
+      or: '(' + parts.join(',') + ')',
+      published_at: 'gt.' + new Date(min).toISOString(),
+      order: 'published_at.desc', limit: '40'
+    });
+    const items = rows.filter((b) => !f.seen.includes(b.id) && b.published_at && (
+      (has(f.authors, b.author) && Date.parse(b.published_at) > f.authors[b.author]) ||
+      (b.series && has(f.series, b.series) && Date.parse(b.published_at) > f.series[b.series])));
+    if (!items.length) { sec.remove(); return null; }
+    const row = bookRow(items);
+    [...row.children].forEach((a, i) => a.addEventListener('click', () => markSeen([items[i].id])));
+    return h('div', {}, row, h('button', {
+      class: 'btn ghost', type: 'button', style: 'padding:4px 12px;font-size:13px',
+      onclick: () => { markSeen(items.map((b) => b.id)); sec.remove(); }
+    }, tx.dismiss));
+  });
+  return sec;
+}
+
 // 丛书：同一套书按册数排列，当前这本高亮
 const SERIES_TX = { kk: 'Топтама', ru: 'Серия', zh: '丛书', en: 'Series' };
 function seriesSection(book) {
@@ -415,6 +540,7 @@ function seriesSection(book) {
     const me = (await fetchBooks({ id: 'eq.' + book.id, select: 'id,series' }))[0];
     if (!me || !me.series) { sec.remove(); return null; }
     sec.querySelector('h2').textContent = tx + ': ' + me.series;
+    sec.querySelector('.sec-h').append(followBtn('series', me.series));
     const items = await fetchBooks({ series: 'eq.' + me.series, order: 'series_no.asc.nullslast,title.asc', limit: '60' });
     if (items.length < 2) { sec.remove(); return null; }
     const row = bookRow(items);
@@ -494,6 +620,7 @@ function bookDetail(book, chapters, cats) {
   const info = h('div', { class: 'bk-info' },
     h('h1', { lang: tag, dir: 'auto' }, book.title),
     h('div', { class: 'bk-author', lang: tag, dir: 'auto' }, book.author),
+    book.author ? h('div', { style: 'margin:4px 0' }, followBtn('authors', book.author)) : null,
     h('div', {},
       h('span', { class: 'tag' }, bookLabel(book)),
       cat ? h('span', { class: 'tag' }, localized(cat.name)) : null),
@@ -516,6 +643,7 @@ function bookDetail(book, chapters, cats) {
 
   return h('div', {},
     h('div', { class: 'bk' }, h('div', { class: 'bk-cover' }, cover(book)), info),
+    chapters.length ? section(((SEARCH_TX[getLang()] || SEARCH_TX.kk).title), searchBox(book)) : null,
     toc,
     seriesSection(book),
     moreSections(book));
