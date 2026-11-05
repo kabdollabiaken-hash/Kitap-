@@ -523,6 +523,8 @@ function editForm(b, cats, redraw) {
     cover: h('input', { type: 'url', placeholder: 'https://…' }),
     cat: h('select', {}, h('option', { value: '' }, '（不分类）'), cats.map((c) => h('option', { value: c.slug }, (c.name && (c.name.zh || c.name.en || c.name.kk)) || c.slug))),
     note: h('textarea', { dir: 'auto' }),
+    series: h('input', { dir: 'auto', placeholder: '不属于丛书就留空' }),
+    sno: h('input', { type: 'number', min: '0', placeholder: '第几册，如 1' }),
     dir: h('select', {}, ['ltr', 'rtl', 'auto'].map((k) => h('option', { value: k }, { ltr: '从左到右', rtl: '从右到左', auto: '自动' }[k]))),
     img: h('input', { type: 'file', accept: 'image/*' })
   };
@@ -530,6 +532,8 @@ function editForm(b, cats, redraw) {
   f.cover.value = b.cover_url || '';
   f.cat.value = catSlug;
   f.note.value = b.copyright_note || '';
+  f.series.value = b.series || '';
+  f.sno.value = b.series_no == null ? '' : b.series_no;
   f.dir.value = b.text_direction || 'auto';
   const msg = h('div', { class: 'muted' });
   const save = h('button', {}, '保存修改');
@@ -539,10 +543,12 @@ function editForm(b, cats, redraw) {
       await api('update_book', { id: b.id, fields: {
         title: f.title.value, author: f.author.value, description: f.desc.value,
         cover_url: f.cover.value.trim(), category_slug: f.cat.value,
-        copyright_note: f.note.value, text_direction: f.dir.value
+        copyright_note: f.note.value, text_direction: f.dir.value,
+        series: f.series.value, series_no: f.sno.value
       } });
       b.title = f.title.value; b.author = f.author.value; b.description = f.desc.value || null;
       b.cover_url = f.cover.value.trim() || null; b.copyright_note = f.note.value; b.text_direction = f.dir.value;
+      b.series = f.series.value.trim() || null; b.series_no = b.series && f.sno.value !== '' ? parseInt(f.sno.value, 10) : null;
       b.category_id = (cats.find((c) => c.slug === f.cat.value) || {}).id || null;
       if (f.img.files[0]) {
         msg.textContent = '上传封面…';
@@ -555,7 +561,7 @@ function editForm(b, cats, redraw) {
   const field = (label, el) => [h('label', {}, label), el];
   return h('div', { class: 'editbox' },
     field('书名', f.title), field('作者', f.author), field('简介', f.desc),
-    field('分类', f.cat), field('版权来源', f.note), field('文字方向', f.dir),
+    field('分类', f.cat), field('丛书名（同一套书要写得一模一样）', f.series), field('第几册', f.sno), field('版权来源', f.note), field('文字方向', f.dir),
     field('封面：选一张图片上传（自动压缩）', f.img),
     field('或者填封面图片地址（https://…）', f.cover),
     h('p', { class: 'muted' }, '语言和文字不能修改。选了图片会优先使用图片。'),
