@@ -135,6 +135,12 @@ const readFont = () => {
   try { const v = localStorage.getItem('rd-font'); return FONT_KEYS.includes(v) ? v : ''; } catch (e) { return ''; }
 };
 const saveFont = (v) => { try { localStorage.setItem('rd-font', v); } catch (e) { /* ignore */ } };
+if (!document.querySelector('style[data-sr-hit]')) {
+  const st = document.createElement('style');
+  st.setAttribute('data-sr-hit', '');
+  st.textContent = 'mark.sr-hit{background:#ffe08a;color:#000;border-radius:3px;padding:0 1px}';
+  document.head.appendChild(st);
+}
 if (!document.querySelector('style[data-rd-font]')) {
   const st = document.createElement('style');
   st.setAttribute('data-rd-font', '1');
@@ -888,6 +894,39 @@ export function viewReader(params) {
       if (again) { again.classList.add('hl-flash'); setTimeout(() => again.classList.remove('hl-flash'), 1800); }
     };
 
+    // 从“书内搜索”点进来：翻到关键词所在位置，并高亮
+    const jumpToText = (pos, q) => {
+      if (disposed || !ready) return;
+      const scope = prefs.pageMode === 'scroll' ? host : (layers && layers[0].flow);
+      if (!scope) return;
+      const ps = [...scope.querySelectorAll('p[data-s]')];
+      if (!ps.length) return;
+      let i = 0;
+      for (let k = 0; k < ps.length; k++) { if (parseInt(ps[k].dataset.s, 10) <= pos) i = k; else break; }
+      const low = q.toLowerCase();
+      let at = i;
+      for (let k = i; k < Math.min(ps.length, i + 3); k++) { if (ps[k].textContent.toLowerCase().includes(low)) { at = k; break; } }
+      const sv = ps[at].dataset.s;
+      if (prefs.pageMode === 'scroll') ps[at].scrollIntoView({ block: 'center' });
+      else if (pager) { const pg = pager.pageOf(ps[at]); if (pg >= 0) pager.go(pg); }
+      const again = scope.querySelector('p[data-s="' + sv + '"]');
+      if (!again) return;
+      const w = document.createTreeWalker(again, NodeFilter.SHOW_TEXT);
+      let n;
+      while ((n = w.nextNode())) {
+        const x = n.nodeValue.toLowerCase().indexOf(low);
+        if (x < 0) continue;
+        try {
+          const r = document.createRange();
+          r.setStart(n, x); r.setEnd(n, x + q.length);
+          const mk = document.createElement('mark');
+          mk.className = 'sr-hit';
+          r.surroundContents(mk);
+          setTimeout(() => { if (mk.parentNode) mk.replaceWith(document.createTextNode(mk.textContent)); }, 6000);
+        } catch (e) { /* 跨标签的词：不高亮，已经翻到所在页 */ }
+        break;
+      }
+    };
     // 预取前后章节：翻过去的时候直接从内存里取
     setTimeout(() => {
       [idx + 1, idx - 1].forEach((i) => {
@@ -897,13 +936,22 @@ export function viewReader(params) {
     }, 400);
 
     const jm = (location.hash.match(/[?&]m=([0-9a-f-]{36})/i) || [])[1] || '';
+    const sm = location.hash.match(/[?&]s=(\d+)/);
+    const sqm = location.hash.match(/[?&]q=([^&]+)/);
+    let jq = '';
+    try { jq = sqm ? decodeURIComponent(sqm[1]) : ''; } catch (e) { jq = ''; }
+    const js = sm && jq ? parseInt(sm[1], 10) : -1; // 从“书内搜索”点进来：跳到关键词
     const marksReady = ui.load(); // 先用本机缓存的划线，云端的随后到
     const prog = storage.getProgress(book.id);
-    const want = prog && prog.chapterId === chapter.id && prog.ratio < 0.98 ? prog.ratio : 0;
+    const want = js < 0 && prog && prog.chapterId === chapter.id && prog.ratio < 0.98 ? prog.ratio : 0;
     const atLast = gotoLast === chapter.id;
     if (atLast) gotoLast = null;
     await renderContent(want, atLast);
     if (disposed) return;
+    if (js >= 0) {
+      try { history.replaceState(null, '', location.pathname + location.search + '#/read/' + enc(book.id) + '/' + enc(chapter.id)); } catch (e) { /* ignore */ }
+      jumpToText(js, jq);
+    }
     if (jm) {
       try { history.replaceState(null, '', location.pathname + location.search + '#/read/' + enc(book.id) + '/' + enc(chapter.id)); } catch (e) { /* ignore */ }
       jumpTo(jm, marksReady);
