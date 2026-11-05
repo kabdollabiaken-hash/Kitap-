@@ -7,6 +7,7 @@ import { storage } from './storage.js';
 import { parseHash, onRouteChange, navigate } from './router.js';
 import { listBooks, getCategories, getBook, getChapterList, langTag } from './api.js';
 import { getBooksByIds } from './api-extra.js';
+import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { h, enc, loadInto } from './ui.js';
 import { viewReader, leaveReader } from './reader.js';
 import { viewMe, viewLogin } from './me.js';
@@ -377,6 +378,58 @@ function descBlock(text, tag) {
   return h('div', { dir: 'auto' }, p, btn);
 }
 
+// ---------- 更多好书：同一作者的其他书 + 相关推荐 ----------
+const MORE_TX = {
+  kk: { author: 'Осы автордың басқа кітаптары', like: 'Ұқсас кітаптар' },
+  ru: { author: 'Другие книги автора', like: 'Похожие книги' },
+  zh: { author: '同一作者的其他书', like: '相关推荐' },
+  en: { author: 'More by this author', like: 'You may also like' }
+};
+async function fetchBooks(params) {
+  const url = new URL(SUPABASE_URL + '/rest/v1/books');
+  url.searchParams.set('select', 'id,title,author,cover_url,language,script');
+  url.searchParams.set('status', 'eq.published');
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  const r = await fetch(url, { headers: { apikey: SUPABASE_KEY } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+// 横向滑动的一排书
+function bookRow(items) {
+  return h('div', { style: 'display:flex;gap:12px;overflow-x:auto;padding:2px 2px 8px;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity' },
+    items.map((b) => {
+      const card = bookCard(b);
+      card.style.flex = '0 0 112px';
+      card.style.scrollSnapAlign = 'start';
+      return card;
+    }));
+}
+function moreSections(book) {
+  const tx = MORE_TX[getLang()] || MORE_TX.kk;
+  const seen = new Set([book.id]);
+  const authorBox = h('div');
+  const likeBox = h('div');
+  const out = [];
+  if (book.author) {
+    out.push(section(tx.author, authorBox));
+    loadInto(authorBox, async () => {
+      const items = await fetchBooks({ author: 'eq.' + book.author, id: 'neq.' + book.id, order: 'published_at.desc.nullslast', limit: '12' });
+      items.forEach((b) => seen.add(b.id));
+      return items.length ? bookRow(items) : null;
+    });
+  }
+  out.push(section(tx.like, likeBox));
+  loadInto(likeBox, async () => {
+    // 先等同一作者那一栏，避免同一本书出现两次
+    await new Promise((res) => setTimeout(res, 300));
+    const p = { language: 'eq.' + book.language, id: 'neq.' + book.id, order: 'published_at.desc.nullslast', limit: '16' };
+    if (book.category_id) p.category_id = 'eq.' + book.category_id;
+    const items = (await fetchBooks(p)).filter((b) => !seen.has(b.id) && b.author !== book.author).slice(0, 12);
+    return items.length ? bookRow(items) : null;
+  });
+  return out;
+}
+
 function bookDetail(book, chapters, cats) {
   const tag = langTag(book);
   const cat = cats.find((c) => c.id === book.category_id);
@@ -440,7 +493,8 @@ function bookDetail(book, chapters, cats) {
 
   return h('div', {},
     h('div', { class: 'bk' }, h('div', { class: 'bk-cover' }, cover(book)), info),
-    toc);
+    toc,
+    moreSections(book));
 }
 
 function viewBook() {
