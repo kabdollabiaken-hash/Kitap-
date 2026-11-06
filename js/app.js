@@ -812,6 +812,7 @@ function render(scrollTop = true) {
     // 阅读器是全屏的，不显示网站的顶栏和底部标签
     app.replaceChildren(viewReader(route.params));
   } else {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); // 离开阅读器就退出全屏
     app.replaceChildren(
       renderHeader(),
       h('main', { id: 'view', class: 'view' }, renderView()),
