@@ -158,6 +158,45 @@ const loadNaskh = () => {
   }).catch(() => {});
 };
 
+// ---------- 纹理背景（全部用代码生成，不需要图片文件）----------
+const NOISE = (r, g, b, a) => 'url("data:image/svg+xml;utf8,' + encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/>" +
+  "<feColorMatrix values='0 0 0 0 " + r + " 0 0 0 0 " + g + " 0 0 0 0 " + b + " 0 0 0 " + a + " 0'/></filter><rect width='100%' height='100%' filter='url(#n)'/></svg>") + '")';
+const TEXTURES = {
+  paper: { c: '#f3eee2', t: '#2b2b2b', img: NOISE(0.4, 0.33, 0.2, 0.16) },
+  parchment: { c: '#e8d7ae', t: '#3a2a14', img: NOISE(0.45, 0.3, 0.1, 0.22) + ',radial-gradient(ellipse at 50% 40%,rgba(255,255,255,.28) 0,rgba(130,85,20,.20) 100%)' },
+  linen: { c: '#e6e4dc', t: '#2a2a2a', img: 'repeating-linear-gradient(0deg,rgba(0,0,0,.035) 0 1px,transparent 1px 3px),repeating-linear-gradient(90deg,rgba(0,0,0,.035) 0 1px,transparent 1px 3px)' },
+  dusk: { c: '#1a2342', t: '#dfe3f0', img: NOISE(1, 1, 1, 0.07) + ',linear-gradient(180deg,#222d52,#10162b)' },
+  ink: { c: '#1c1a17', t: '#d6cfbf', img: NOISE(1, 0.95, 0.85, 0.06) }
+};
+const TEX_KEYS = ['paper', 'parchment', 'linen', 'dusk', 'ink'];
+const TEX_TX = {
+  kk: { label: 'Фон', none: 'Түс', paper: 'Қағаз', parchment: 'Пергамент', linen: 'Зығыр', dusk: 'Түн', ink: 'Тушь', full: 'Толық экран' },
+  ru: { label: 'Фон', none: 'Цвет', paper: 'Бумага', parchment: 'Пергамент', linen: 'Лён', dusk: 'Сумерки', ink: 'Тушь', full: 'Во весь экран' },
+  zh: { label: '背景', none: '纯色', paper: '纸张', parchment: '羊皮纸', linen: '亚麻', dusk: '夜空', ink: '墨色', full: '全屏' },
+  en: { label: 'Background', none: 'Plain', paper: 'Paper', parchment: 'Parchment', linen: 'Linen', dusk: 'Dusk', ink: 'Ink', full: 'Fullscreen' }
+};
+const TXB = (k) => {
+  const l = (document.documentElement.lang || '').slice(0, 2).toLowerCase();
+  return (TEX_TX[l] || TEX_TX.kk)[k];
+};
+const readTex = () => {
+  try { const v = localStorage.getItem('rd-tex'); return TEX_KEYS.includes(v) ? v : ''; } catch (e) { return ''; }
+};
+const saveTex = (k) => { try { if (k) localStorage.setItem('rd-tex', k); else localStorage.removeItem('rd-tex'); } catch (e) { /* ignore */ } };
+if (!document.querySelector('style[data-rd-tex]')) {
+  const st = document.createElement('style');
+  st.setAttribute('data-rd-tex', '');
+  st.textContent = TEX_KEYS.map((k) => {
+    const x = TEXTURES[k];
+    const r = '.rd[data-tex="' + k + '"]';
+    return [r + ',' + r + ' .rd-host,' + r + ' .pg-stage,' + r + ' .pg-layer,' + r + ' .pg-clip{background-color:' + x.c + '!important;background-image:' + x.img + '!important}',
+      r + ' .rd-bar,' + r + ' .rd-foot{background:' + x.c + '!important}',
+      r + ' .rd-p,' + r + ' .rd-h,' + r + ' .rd-note,' + r + ' .pg-num,' + r + ' .rd-bar,' + r + ' .rd-bar .rd-ico,' + r + ' .rd-bar span,' + r + ' .rd-foot,' + r + ' .rd-foot button,' + r + ' .rd-pct{color:' + x.t + '!important}'].join('\n');
+  }).join('\n');
+  document.head.appendChild(st);
+}
+
 // ---------- 错字反馈 ----------
 const TYPO_TX = {
   kk: { title: 'Қате туралы хабарлау', hint: 'Қате сөзді таңдап, осы түймені басыңыз.', wrong: 'Қате мәтін', fix: 'Дұрыс нұсқасы', note: 'Ескерту (міндетті емес)', send: 'Жіберу', ok: 'Рақмет! Жіберілді.', err: 'Жіберілмеді, қайталап көріңіз.', need: 'Екі өрісті де толтырыңыз.' },
@@ -457,6 +496,7 @@ export function viewReader(params) {
   let prefs = storage.getPrefs();
   let fontKey = readFont(); // 空 = 读者还没选过
   let bookArabic = false; // 当前书是不是阿拉伯文字
+  let texKey = readTex(); // 纹理背景，空 = 用普通主题色
   const effFont = () => fontKey || (bookArabic ? 'naskh' : 'default');
   let disposed = false;
   let ready = false;
@@ -492,7 +532,14 @@ export function viewReader(params) {
     if (fk === 'naskh') loadNaskh();
     if (fk === 'default') { root.removeAttribute('data-font'); root.style.removeProperty('--rd-font'); }
     else { root.setAttribute('data-font', fk); root.style.setProperty('--rd-font', FONT_STACK[fk]); }
-    document.body.style.background = BG[prefs.theme];
+    if (texKey) {
+      root.setAttribute('data-tex', texKey);
+      document.body.style.background = TEXTURES[texKey].c;
+      document.body.style.backgroundImage = TEXTURES[texKey].img;
+    } else {
+      root.removeAttribute('data-tex');
+      document.body.style.background = BG[prefs.theme];
+    }
   };
   applyPrefs();
 
@@ -655,6 +702,12 @@ export function viewReader(params) {
       if (prefs.pageMode !== 'scroll' || oldMode !== 'scroll') renderContent(r, false); // 分页模式：重新排版分页
       else { scrollToRatio(r); updateBar(); } // 滚动模式：字号/行距变化后保持原位置
     };
+    const setTex = (k) => {
+      texKey = k;
+      saveTex(k);
+      applyPrefs();
+      drawSettings();
+    };
     const setFont = (k) => {
       if (k === effFont()) return;
       const r = getRaw();
@@ -705,7 +758,15 @@ export function viewReader(params) {
             h('button', {
               class: 'rd-sw', type: 'button', 'aria-label': t('reader.theme.' + k),
               'aria-pressed': prefs.theme === k ? 'true' : 'false',
-              style: 'background:' + BG[k], onclick: () => setPref({ theme: k })
+              style: 'background:' + BG[k], onclick: () => { texKey = ''; saveTex(''); setPref({ theme: k }); }
+            })))),
+        h('div', { class: 'rd-row' },
+          h('span', {}, TXB('label')),
+          h('div', { class: 'rd-seg' }, TEX_KEYS.map((k) =>
+            h('button', {
+              class: 'rd-sw', type: 'button', 'aria-label': TXB(k), title: TXB(k),
+              'aria-pressed': texKey === k ? 'true' : 'false',
+              style: 'background-color:' + TEXTURES[k].c + ';background-image:' + TEXTURES[k].img, onclick: () => setTex(k)
             })))));
     }
     drawSettings();
@@ -785,7 +846,14 @@ export function viewReader(params) {
       h('span', { class: 'rd-t2', lang: tag, dir: 'auto' }, chapter.title)),
       h('button', { class: 'rd-ico', type: 'button', 'aria-label': t('book.contents'), onclick: () => openSheet(tocSheet) }, ico('<path d="M4 6h16M4 12h16M4 18h10"/>')),
       h('button', { class: 'rd-ico', type: 'button', 'aria-label': t('reader.settings'), onclick: () => openSheet(setSheet) }, 'Aa'),
-      h('button', { class: 'rd-ico', type: 'button', 'aria-label': TX('title'), onclick: () => { drawTypo(); openSheet(typoSheet); } }, ico('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>')));
+      h('button', { class: 'rd-ico', type: 'button', 'aria-label': TX('title'), onclick: () => { drawTypo(); openSheet(typoSheet); } }, ico('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>')),
+      document.fullscreenEnabled ? h('button', {
+        class: 'rd-ico', type: 'button', 'aria-label': TXB('full'),
+        onclick: () => {
+          if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+          else document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+        }
+      }, ico('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>')) : null);
 
     audioCtl = chapter.audio_path ? createAudio({
       path: chapter.audio_path, chapterId: chapter.id, bookId: book.id,
