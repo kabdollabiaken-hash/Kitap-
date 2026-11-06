@@ -119,7 +119,7 @@ const actions = {
   async list() {
     const rows = await db('GET', 'books', {
       params: {
-        select: 'id,title,author,description,cover_url,category_id,text_direction,language,script,status,is_featured,copyright_note,series,series_no,created_at,published_at,chapters(count)',
+        select: 'id,title,author,description,cover_url,category_id,text_direction,language,script,status,is_featured,copyright_note,series,series_no,work,created_at,published_at,chapters(count)',
         order: 'created_at.desc',
         limit: '500'
       }
@@ -167,8 +167,9 @@ const actions = {
       series_no = parseInt(fields.series_no, 10);
       if (!Number.isInteger(series_no) || series_no < 0 || series_no > 9999) throw bad('册数必须是数字');
     }
+    const work = typeof fields.work === 'string' && fields.work.trim() !== '' ? fields.work.trim() : null;
     await bookStatus(id);
-    await db('PATCH', 'books', { params: { id: 'eq.' + id }, body: { title, author, description, cover_url, category_id, copyright_note, text_direction: fields.text_direction, series, series_no: series ? series_no : null } });
+    await db('PATCH', 'books', { params: { id: 'eq.' + id }, body: { title, author, description, cover_url, category_id, copyright_note, text_direction: fields.text_direction, series, series_no: series ? series_no : null, work } });
     return { ok: true };
   },
 
