@@ -44,7 +44,7 @@ const dict = {
     'langname.en': 'Ағылшынша',
     'script.cyrillic': 'Кирилл жазуы',
     'script.latin': 'Латын жазуы',
-    'script.arabic': 'Араб жазуы',
+    'script.arabic': 'Төте жазу',
     'script.han': 'Иероглиф',
     'book.start': 'Оқуды бастау',
     'book.addShelf': 'Сөреге қосу',
