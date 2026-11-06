@@ -529,6 +529,21 @@ function followSection() {
   return sec;
 }
 
+// ---------- 同一本书的其他文字 / 语言版本 ----------
+function editionSwitch(book) {
+  const box = h('div', { style: 'margin:6px 0' });
+  loadInto(box, async () => {
+    const me = (await fetchBooks({ id: 'eq.' + book.id, select: 'id,work' }))[0];
+    if (!me || !me.work) return null;
+    const items = await fetchBooks({ work: 'eq.' + me.work, order: 'language.asc,script.asc', limit: '12' });
+    if (items.length < 2) return null;
+    return h('div', { style: 'display:flex;flex-wrap:wrap;gap:6px' }, items.map((b) => b.id === book.id
+      ? h('span', { 'aria-current': 'true', style: 'padding:5px 12px;border-radius:999px;background:#2e6f5e;color:#fff;font-size:13px' }, bookLabel(b))
+      : h('a', { href: '#/book/' + enc(b.id), style: 'padding:5px 12px;border-radius:999px;border:1px solid rgba(128,128,128,.5);color:inherit;text-decoration:none;font-size:13px' }, bookLabel(b))));
+  });
+  return box;
+}
+
 // 丛书：同一套书按册数排列，当前这本高亮
 const SERIES_TX = { kk: 'Топтама', ru: 'Серия', zh: '丛书', en: 'Series' };
 function seriesSection(book) {
@@ -621,6 +636,7 @@ function bookDetail(book, chapters, cats) {
     h('h1', { lang: tag, dir: 'auto' }, book.title),
     h('div', { class: 'bk-author', lang: tag, dir: 'auto' }, book.author),
     book.author ? h('div', { style: 'margin:4px 0' }, followBtn('authors', book.author)) : null,
+    editionSwitch(book),
     h('div', {},
       h('span', { class: 'tag' }, bookLabel(book)),
       cat ? h('span', { class: 'tag' }, localized(cat.name)) : null),
