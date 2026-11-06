@@ -165,23 +165,46 @@ const loadNaskh = () => {
   }).catch(() => {});
 };
 
-// ---------- 纹理背景（全部用代码生成，不需要图片文件）----------
-const NOISE = (r, g, b, a) => 'url("data:image/svg+xml;utf8,' + encodeURIComponent(
-  "<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/>" +
-  "<feColorMatrix values='0 0 0 0 " + r + " 0 0 0 0 " + g + " 0 0 0 0 " + b + " 0 0 0 " + a + " 0'/></filter><rect width='100%' height='100%' filter='url(#n)'/></svg>") + '")';
+// ---------- 纹理背景（用代码画一小块图案再平铺，不需要图片文件）----------
+// 图案是一张 128×128 的小位图：翻页时手机只需要搬动位图，不会卡
+const tileCache = {};
+function tileUrl(k) {
+  if (tileCache[k]) return tileCache[k];
+  const S = 128;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const g = c.getContext('2d');
+  const d = g.createImageData(S, S);
+  let seed = 9001 + k.length * 777;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const P = { paper: [100, 85, 50, 0.10], parchment: [110, 75, 25, 0.16], linen: [0, 0, 0, 0.04], dusk: [255, 255, 255, 0.05], ink: [255, 240, 215, 0.045] }[k];
+  for (let i = 0; i < S * S; i++) {
+    d.data[i * 4] = P[0]; d.data[i * 4 + 1] = P[1]; d.data[i * 4 + 2] = P[2];
+    d.data[i * 4 + 3] = Math.round(rnd() * P[3] * 255);
+  }
+  g.putImageData(d, 0, 0);
+  if (k === 'linen') {
+    g.fillStyle = 'rgba(0,0,0,.05)';
+    for (let y = 0; y < S; y += 4) g.fillRect(0, y, S, 1);
+    for (let x = 0; x < S; x += 4) g.fillRect(x, 0, 1, S);
+  }
+  tileCache[k] = 'url("' + c.toDataURL('image/png') + '")';
+  return tileCache[k];
+}
 const TEXTURES = {
-  paper: { c: '#f3eee2', t: '#2b2b2b', img: NOISE(0.4, 0.33, 0.2, 0.16) },
-  parchment: { c: '#e8d7ae', t: '#3a2a14', img: NOISE(0.45, 0.3, 0.1, 0.22) + ',radial-gradient(ellipse at 50% 40%,rgba(255,255,255,.28) 0,rgba(130,85,20,.20) 100%)' },
-  linen: { c: '#e6e4dc', t: '#2a2a2a', img: 'repeating-linear-gradient(0deg,rgba(0,0,0,.035) 0 1px,transparent 1px 3px),repeating-linear-gradient(90deg,rgba(0,0,0,.035) 0 1px,transparent 1px 3px)' },
-  dusk: { c: '#1a2342', t: '#dfe3f0', img: NOISE(1, 1, 1, 0.07) + ',linear-gradient(180deg,#222d52,#10162b)' },
-  ink: { c: '#1c1a17', t: '#d6cfbf', img: NOISE(1, 0.95, 0.85, 0.06) }
+  paper: { c: '#f3eee2', t: '#2b2b2b' },
+  parchment: { c: '#e8d7ae', t: '#3a2a14' },
+  linen: { c: '#e6e4dc', t: '#2a2a2a' },
+  dusk: { c: '#1a2342', t: '#dfe3f0' },
+  ink: { c: '#1c1a17', t: '#d6cfbf' }
 };
+for (const k of Object.keys(TEXTURES)) Object.defineProperty(TEXTURES[k], 'img', { get: () => tileUrl(k) });
 const TEX_KEYS = ['paper', 'parchment', 'linen', 'dusk', 'ink'];
 const TEX_TX = {
-  kk: { label: 'Фон', none: 'Түс', paper: 'Қағаз', parchment: 'Пергамент', linen: 'Зығыр', dusk: 'Түн', ink: 'Тушь', full: 'Толық экран' },
-  ru: { label: 'Фон', none: 'Цвет', paper: 'Бумага', parchment: 'Пергамент', linen: 'Лён', dusk: 'Сумерки', ink: 'Тушь', full: 'Во весь экран' },
-  zh: { label: '背景', none: '纯色', paper: '纸张', parchment: '羊皮纸', linen: '亚麻', dusk: '夜空', ink: '墨色', full: '全屏' },
-  en: { label: 'Background', none: 'Plain', paper: 'Paper', parchment: 'Parchment', linen: 'Linen', dusk: 'Dusk', ink: 'Ink', full: 'Fullscreen' }
+  kk: { label: 'Фон', none: 'Түс', paper: 'Қағаз', parchment: 'Пергамент', linen: 'Зығыр', dusk: 'Түн', ink: 'Тушь' },
+  ru: { label: 'Фон', none: 'Цвет', paper: 'Бумага', parchment: 'Пергамент', linen: 'Лён', dusk: 'Сумерки', ink: 'Тушь' },
+  zh: { label: '背景', none: '纯色', paper: '纸张', parchment: '羊皮纸', linen: '亚麻', dusk: '夜空', ink: '墨色' },
+  en: { label: 'Background', none: 'Plain', paper: 'Paper', parchment: 'Parchment', linen: 'Linen', dusk: 'Dusk', ink: 'Ink' }
 };
 const TXB = (k) => {
   const l = (document.documentElement.lang || '').slice(0, 2).toLowerCase();
@@ -191,16 +214,20 @@ const readTex = () => {
   try { const v = localStorage.getItem('rd-tex'); return TEX_KEYS.includes(v) ? v : ''; } catch (e) { return ''; }
 };
 const saveTex = (k) => { try { if (k) localStorage.setItem('rd-tex', k); else localStorage.removeItem('rd-tex'); } catch (e) { /* ignore */ } };
-if (!document.querySelector('style[data-rd-tex]')) {
+const texReady = {};
+function ensureTexCss(k) { // 只在选中某个背景时才生成它的样式
+  if (texReady[k]) return;
+  texReady[k] = true;
+  const x = TEXTURES[k];
+  const r = '.rd[data-tex="' + k + '"]';
   const st = document.createElement('style');
-  st.setAttribute('data-rd-tex', '');
-  st.textContent = TEX_KEYS.map((k) => {
-    const x = TEXTURES[k];
-    const r = '.rd[data-tex="' + k + '"]';
-    return [r + ',' + r + ' .rd-host,' + r + ' .pg-stage,' + r + ' .pg-layer,' + r + ' .pg-clip{background-color:' + x.c + '!important;background-image:' + x.img + '!important}',
-      r + ' .rd-bar,' + r + ' .rd-foot{background:' + x.c + '!important}',
-      r + ' .rd-p,' + r + ' .rd-h,' + r + ' .rd-note,' + r + ' .pg-num,' + r + ' .rd-bar,' + r + ' .rd-bar .rd-ico,' + r + ' .rd-bar span,' + r + ' .rd-foot,' + r + ' .rd-foot button,' + r + ' .rd-pct{color:' + x.t + '!important}'].join('\n');
-  }).join('\n');
+  st.textContent = [
+    // 只有最外层和“页面层”画图案；中间几层透明，减少重复绘制
+    r + ',' + r + ' .pg-layer{background-color:' + x.c + '!important;background-image:' + x.img + '!important;background-size:128px 128px!important}',
+    r + ' .rd-host,' + r + ' .pg-stage,' + r + ' .pg-clip{background:transparent!important}',
+    r + ' .rd-bar,' + r + ' .rd-foot{background:' + x.c + '!important}',
+    r + ' .rd-p,' + r + ' .rd-h,' + r + ' .rd-note,' + r + ' .pg-num,' + r + ' .rd-bar,' + r + ' .rd-bar .rd-ico,' + r + ' .rd-bar span,' + r + ' .rd-foot,' + r + ' .rd-foot button,' + r + ' .rd-pct{color:' + x.t + '!important}'
+  ].join('\n');
   document.head.appendChild(st);
 }
 
@@ -530,7 +557,14 @@ export function viewReader(params) {
   };
   document.body.classList.add('reading');
   if (imm.on && Date.now() - imm.at < 4000) root.classList.add('rd-imm'); else imm.on = false;
-  const toggleImm = () => { imm.on = !root.classList.contains('rd-imm'); root.classList.toggle('rd-imm', imm.on); };
+  let onImm = null; // 阅读器准备好后，由它负责按新的可用高度重新排版
+  const toggleImm = () => {
+    imm.on = !root.classList.contains('rd-imm');
+    root.classList.toggle('rd-imm', imm.on);
+    const sel = window.getSelection();
+    if (sel) sel.removeAllRanges();
+    if (onImm) onImm();
+  };
 
   const applyPrefs = () => {
     root.classList.remove('rd-white', 'rd-sepia', 'rd-green', 'rd-night');
@@ -543,6 +577,7 @@ export function viewReader(params) {
     if (fk === 'default') { root.removeAttribute('data-font'); root.style.removeProperty('--rd-font'); }
     else { root.setAttribute('data-font', fk); root.style.setProperty('--rd-font', FONT_STACK[fk]); }
     if (texKey) {
+      ensureTexCss(texKey);
       root.setAttribute('data-tex', texKey);
       document.body.style.background = TEXTURES[texKey].c;
       document.body.style.backgroundImage = TEXTURES[texKey].img;
@@ -922,8 +957,9 @@ export function viewReader(params) {
         host.replaceChildren(stage);
         await settle();
         if (disposed || token !== renderToken) return;
-        stage.style.insetBlockStart = bar.offsetHeight + 'px';
-        stage.style.insetBlockEnd = foot.offsetHeight + 'px';
+        const immOn = root.classList.contains('rd-imm'); // 沉浸模式：正文占满整个屏幕
+        stage.style.insetBlockStart = immOn ? '0px' : bar.offsetHeight + 'px';
+        stage.style.insetBlockEnd = immOn ? '0px' : foot.offsetHeight + 'px';
         const sw = stage.clientWidth;
         const sh = stage.clientHeight;
         const pad = MARGIN_PX[prefs.margin];
@@ -952,6 +988,8 @@ export function viewReader(params) {
       updateBar();
       if (dirty) { dirty = false; repaint(); }
     };
+
+    onImm = () => { if (!disposed && ready && prefs.pageMode !== 'scroll') renderContent(getRaw(), false); };
 
     // 从“我的笔记”点进来：翻到那条划线所在的页，并闪一下
     const jumpTo = async (id, marksReady) => {
@@ -1038,11 +1076,30 @@ export function viewReader(params) {
     listen(document, 'visibilitychange', () => { if (document.visibilityState === 'hidden' && saveNow) saveNow(); });
     listen(window, 'pagehide', () => { if (saveNow) saveNow(); });
     // 滚动模式：点划线打开工具条；点别处收起工具条
+    // 手指轻点：不让浏览器把点到的字选中（安卓 Chrome 会弹出“点按搜索”）；长按选字不受影响
+    let ts = null;
+    listen(host, 'touchstart', (e) => {
+      const p = e.touches[0];
+      ts = e.touches.length === 1 && p ? { x: p.clientX, y: p.clientY, t: Date.now() } : null;
+    }, { passive: true });
+    listen(host, 'touchend', (e) => {
+      const c = e.changedTouches[0];
+      const q = ts;
+      ts = null;
+      if (!q || !c || e.touches.length) return;
+      if (Date.now() - q.t > 300 || Math.hypot(c.clientX - q.x, c.clientY - q.y) > 10) return;
+      if (e.target.closest && e.target.closest('a,button,input,textarea,.hl,.rd-sheet')) return;
+      const sel = window.getSelection();
+      if (sel && sel.toString()) return;
+      if (e.cancelable) e.preventDefault();
+      if (prefs.pageMode === 'scroll') { ui.tap(c.clientX, c.clientY); toggleImm(); } // 点正文：显示/隐藏顶栏和底栏
+    }, { passive: false });
+    // 鼠标点击（电脑）
     listen(host, 'click', (e) => {
       if (prefs.pageMode !== 'scroll') return;
       ui.tap(e.clientX, e.clientY);
       const sel = window.getSelection();
-      if (!e.target.closest('.hl,a,button') && !(sel && sel.toString())) toggleImm(); // 点正文：显示/隐藏顶栏和底栏
+      if (!e.target.closest('.hl,a,button') && !(sel && sel.toString())) toggleImm();
     });
     listen(document, 'keydown', (e) => {
       if (e.target && /^(TEXTAREA|INPUT)$/.test(e.target.tagName)) return; // 写想法时不翻页
