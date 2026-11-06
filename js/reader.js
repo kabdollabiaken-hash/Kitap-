@@ -29,8 +29,15 @@ const PAD_BOTTOM = 26;
 
 let active = null; // 当前阅读器的清理函数（保存进度、移除监听）
 let gotoLast = null; // 从下一章“往回翻”到上一章时，直接打开上一章的最后一页
+const imm = { on: false, at: 0 }; // 沉浸模式（隐藏顶栏和底栏）：翻到下一章时保持，离开阅读器后恢复
+if (!document.querySelector('style[data-rd-imm]')) {
+  const st = document.createElement('style');
+  st.setAttribute('data-rd-imm', '');
+  st.textContent = '.rd .rd-bar,.rd .rd-foot{transition:opacity .2s}.rd.rd-imm .rd-bar,.rd.rd-imm .rd-foot{opacity:0;pointer-events:none}';
+  document.head.appendChild(st);
+}
 export function leaveReader() {
-  if (active) { const fn = active; active = null; fn(); }
+  if (active) { const fn = active; active = null; fn(); imm.at = Date.now(); }
 }
 
 async function getChapter(bookId, chapterId) {
@@ -406,6 +413,7 @@ function createPager(o) {
   const tap = (x, y) => {
     const r = stage.getBoundingClientRect();
     const f = (x - r.left) / r.width;
+    if (o.onCenter && f >= 0.3 && f <= 0.7) { o.onCenter(); return; } // 点中间：显示/隐藏顶栏和底栏
     const back = rtl ? f > 0.7 : f < 0.3;
     flip(!back, vertOf(y));
   };
@@ -521,6 +529,8 @@ export function viewReader(params) {
     document.body.style.background = '';
   };
   document.body.classList.add('reading');
+  if (imm.on && Date.now() - imm.at < 4000) root.classList.add('rd-imm'); else imm.on = false;
+  const toggleImm = () => { imm.on = !root.classList.contains('rd-imm'); root.classList.toggle('rd-imm', imm.on); };
 
   const applyPrefs = () => {
     root.classList.remove('rd-white', 'rd-sepia', 'rd-green', 'rd-night');
@@ -846,14 +856,7 @@ export function viewReader(params) {
       h('span', { class: 'rd-t2', lang: tag, dir: 'auto' }, chapter.title)),
       h('button', { class: 'rd-ico', type: 'button', 'aria-label': t('book.contents'), onclick: () => openSheet(tocSheet) }, ico('<path d="M4 6h16M4 12h16M4 18h10"/>')),
       h('button', { class: 'rd-ico', type: 'button', 'aria-label': t('reader.settings'), onclick: () => openSheet(setSheet) }, 'Aa'),
-      h('button', { class: 'rd-ico', type: 'button', 'aria-label': TX('title'), onclick: () => { drawTypo(); openSheet(typoSheet); } }, ico('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>')),
-      document.fullscreenEnabled ? h('button', {
-        class: 'rd-ico', type: 'button', 'aria-label': TXB('full'),
-        onclick: () => {
-          if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-          else document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
-        }
-      }, ico('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>')) : null);
+      h('button', { class: 'rd-ico', type: 'button', 'aria-label': TX('title'), onclick: () => { drawTypo(); openSheet(typoSheet); } }, ico('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>')));
 
     audioCtl = chapter.audio_path ? createAudio({
       path: chapter.audio_path, chapterId: chapter.id, bookId: book.id,
@@ -935,7 +938,8 @@ export function viewReader(params) {
           stage, A, B, num, W, rtl, mode, anim: prefs.anim, ratio, atLast, label: labelFor,
           onPage: () => { ui.hide(); updateBar(); queueSave(); },
           onEdge: (fwd) => goChapter(fwd),
-          onTap: (x, y) => ui.tap(x, y)
+          onTap: (x, y) => ui.tap(x, y),
+          onCenter: () => toggleImm()
         });
         pager.size = sw + 'x' + sh;
         const idle = window.requestIdleCallback ? (f) => window.requestIdleCallback(f, { timeout: 800 }) : (f) => setTimeout(f, 250);
@@ -1034,7 +1038,12 @@ export function viewReader(params) {
     listen(document, 'visibilitychange', () => { if (document.visibilityState === 'hidden' && saveNow) saveNow(); });
     listen(window, 'pagehide', () => { if (saveNow) saveNow(); });
     // 滚动模式：点划线打开工具条；点别处收起工具条
-    listen(host, 'click', (e) => { if (prefs.pageMode === 'scroll') ui.tap(e.clientX, e.clientY); });
+    listen(host, 'click', (e) => {
+      if (prefs.pageMode !== 'scroll') return;
+      ui.tap(e.clientX, e.clientY);
+      const sel = window.getSelection();
+      if (!e.target.closest('.hl,a,button') && !(sel && sel.toString())) toggleImm(); // 点正文：显示/隐藏顶栏和底栏
+    });
     listen(document, 'keydown', (e) => {
       if (e.target && /^(TEXTAREA|INPUT)$/.test(e.target.tagName)) return; // 写想法时不翻页
       if (e.key === 'Escape') { tocSheet.hidden = true; setSheet.hidden = true; ui.hide(); return; }
