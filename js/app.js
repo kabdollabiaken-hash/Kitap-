@@ -594,6 +594,22 @@ function moreSections(book) {
   return out;
 }
 
+// ---------- 听书入口：这本书有音频章节才显示 ----------
+const LISTEN_TX = { kk: 'Тыңдау', ru: 'Слушать', zh: '听书', en: 'Listen' };
+function listenBtn(book) {
+  const a = h('a', {
+    class: 'btn ghost',
+    href: 'listen.html?book=' + enc(book.id),
+    style: 'display:none'
+  }, LISTEN_TX[getLang()] || LISTEN_TX.kk);
+  fetch(SUPABASE_URL + '/rest/v1/audio_chapters?select=chapter_no&limit=1&book_id=eq.' + encodeURIComponent(book.id),
+    { headers: { apikey: SUPABASE_KEY } })
+    .then((r) => (r.ok ? r.json() : []))
+    .then((rows) => { if (rows.length) a.style.display = ''; })
+    .catch(() => {});
+  return a;
+}
+
 function bookDetail(book, chapters, cats) {
   const tag = langTag(book);
   const cat = cats.find((c) => c.id === book.category_id);
@@ -640,7 +656,7 @@ function bookDetail(book, chapters, cats) {
     h('div', {},
       h('span', { class: 'tag' }, bookLabel(book)),
       cat ? h('span', { class: 'tag' }, localized(cat.name)) : null),
-    h('div', { class: 'bk-actions' }, startEl, shelfBtn, status),
+    h('div', { class: 'bk-actions' }, startEl, shelfBtn, listenBtn(book), status),
     resume ? h('div', { class: 'bk-meta' }, t('book.progress', { n: resume.chapter_number, p: Math.round(progress.ratio * 100) })) : null,
     target ? null : h('p', { class: 'bad' }, t('book.nochapters')),
     book.description ? descBlock(book.description, tag) : null,
