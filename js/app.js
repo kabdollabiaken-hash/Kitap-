@@ -12,6 +12,7 @@ import { h, enc, loadInto } from './ui.js';
 import { viewReader, leaveReader } from './reader.js';
 import { viewMe, viewLogin } from './me.js';
 import { isLoggedIn, onAuth } from './auth.js';
+import { player, audioChapters } from './player.js';
 
 for (const href of ['./css/pages.css', './css/book.css', './css/shelf.css', './css/reader.css', './css/home.css', './css/me.css']) {
   document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'stylesheet', href }));
@@ -594,22 +595,6 @@ function moreSections(book) {
   return out;
 }
 
-// ---------- 听书入口：这本书有音频章节才显示 ----------
-const LISTEN_TX = { kk: 'Тыңдау', ru: 'Слушать', zh: '听书', en: 'Listen' };
-function listenBtn(book) {
-  const a = h('a', {
-    class: 'btn ghost',
-    href: 'listen.html?book=' + enc(book.id),
-    style: 'display:none'
-  }, LISTEN_TX[getLang()] || LISTEN_TX.kk);
-  fetch(SUPABASE_URL + '/rest/v1/audio_chapters?select=chapter_no&limit=1&book_id=eq.' + encodeURIComponent(book.id),
-    { headers: { apikey: SUPABASE_KEY } })
-    .then((r) => (r.ok ? r.json() : []))
-    .then((rows) => { if (rows.length) a.style.display = ''; })
-    .catch(() => {});
-  return a;
-}
-
 function bookDetail(book, chapters, cats) {
   const tag = langTag(book);
   const cat = cats.find((c) => c.id === book.category_id);
@@ -626,6 +611,11 @@ function bookDetail(book, chapters, cats) {
     shelfBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
   };
   shelfBtn.addEventListener('click', () => {
+    if (!isLoggedIn()) { // 书架要登录：登录后回到这本书
+      try { sessionStorage.setItem('kitap:ret', location.hash); } catch (e) { /* ignore */ }
+      navigate('/me');
+      return;
+    }
     if (storage.isInShelf(book.id)) {
       storage.removeFromShelf(book.id);
       status.textContent = t('book.removed');
@@ -639,6 +629,29 @@ function bookDetail(book, chapters, cats) {
     refreshShelf();
   });
   refreshShelf();
+
+  // 听书：这本书有音频时才出现；点一下就播，所有页面边上都会有小播放器
+  const listenSlot = h('span');
+  const needLogin = () => {
+    if (isLoggedIn()) return false;
+    try { sessionStorage.setItem('kitap:ret', location.hash); } catch (e) { /* ignore */ }
+    navigate('/me');
+    return true;
+  };
+  const LT = { kk: 'Тыңдау', ru: 'Слушать', zh: '听书', en: 'Listen' }[getLang()] || 'Тыңдау';
+  audioChapters(book.id).then((list) => {
+    if (!list.length) return;
+    listenSlot.append(h('button', { class: 'btn ghost', type: 'button', onclick: () => { if (!needLogin()) player.playBook(book.id); } }, '♪ ' + LT));
+    const ids = new Set(list.map((c) => c.id));
+    document.querySelectorAll('ol.toc li a').forEach((a) => {
+      const id = decodeURIComponent((a.getAttribute('href') || '').split('/').pop());
+      if (!ids.has(id)) return;
+      a.append(h('span', {
+        role: 'button', 'aria-label': LT, style: 'margin-inline-start:auto;padding:2px 8px;cursor:pointer;color:#2e6f5e',
+        onclick: (e) => { e.preventDefault(); e.stopPropagation(); if (!needLogin()) player.playBook(book.id, id); }
+      }, '♪'));
+    });
+  });
 
   // 开始/继续阅读：没有章节时不打开阅读器
   const startEl = target
@@ -656,7 +669,7 @@ function bookDetail(book, chapters, cats) {
     h('div', {},
       h('span', { class: 'tag' }, bookLabel(book)),
       cat ? h('span', { class: 'tag' }, localized(cat.name)) : null),
-    h('div', { class: 'bk-actions' }, startEl, shelfBtn, listenBtn(book), status),
+    h('div', { class: 'bk-actions' }, startEl, shelfBtn, listenSlot, status),
     resume ? h('div', { class: 'bk-meta' }, t('book.progress', { n: resume.chapter_number, p: Math.round(progress.ratio * 100) })) : null,
     target ? null : h('p', { class: 'bad' }, t('book.nochapters')),
     book.description ? descBlock(book.description, tag) : null,
@@ -819,7 +832,8 @@ function renderView() {
 function render(scrollTop = true) {
   leaveReader(); // 离开阅读器前先保存进度
   document.title = t('brand');
-  if (!isLoggedIn()) { // 没登录：只显示登录页
+  // 没登录：可以看首页、书库、书的详情，并试读前几章；书架和“我”要先登录
+  if (!isLoggedIn() && !['home', 'library', 'book', 'read'].includes(route.name)) {
     app.replaceChildren(viewLogin(() => render(false)));
     window.scrollTo(0, 0);
     return;
@@ -839,6 +853,20 @@ function render(scrollTop = true) {
   if (scrollTop) window.scrollTo(0, 0);
 }
 
+function goReturn() { // 登录完成后，回到登录前正在看的那一页
+  try {
+    const r = sessionStorage.getItem('kitap:ret');
+    if (r && isLoggedIn()) {
+      sessionStorage.removeItem('kitap:ret');
+      if (/^#\/(book|read)\//.test(r)) location.hash = r;
+    }
+  } catch (e) { /* ignore */ }
+}
+
 initLang();
+let playerInit = false;
+const initPlayer = () => { if (!playerInit && isLoggedIn()) { playerInit = true; player.init(); } };
 onRouteChange((r) => { route = r; render(true); });
-onAuth(() => render(true));
+onAuth(() => { render(true); goReturn(); initPlayer(); });
+goReturn();
+initPlayer();
