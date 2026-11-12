@@ -198,13 +198,15 @@ const actions = {
 
   async list_chapters({ book_id }) {
     needId(book_id);
-    const params = { select: 'id,chapter_number,title,audio_path,audio_bytes,audio_seconds', book_id: 'eq.' + book_id, order: 'chapter_number.asc', limit: '2000' };
+    const params = { select: 'id,chapter_number,title,audio_path,audio_bytes,audio_seconds,part', book_id: 'eq.' + book_id, order: 'chapter_number.asc', limit: '2000' };
     let rows;
-    try { rows = await db('GET', 'chapters', { params }); } catch (e) { // 还没给数据库加音频字段时
-      params.select = 'id,chapter_number,title';
-      rows = await db('GET', 'chapters', { params });
+    try { rows = await db('GET', 'chapters', { params }); } catch (e) { // 还没给数据库加“部分”字段时
+      try { params.select = 'id,chapter_number,title,audio_path,audio_bytes,audio_seconds'; rows = await db('GET', 'chapters', { params }); } catch (e2) { // 还没给数据库加音频字段时
+        params.select = 'id,chapter_number,title';
+        rows = await db('GET', 'chapters', { params });
+      }
     }
-    return { chapters: rows, audio_ready: rows.length === 0 || 'audio_path' in rows[0] };
+    return { chapters: rows, audio_ready: rows.length === 0 || 'audio_path' in rows[0], part_ready: rows.length === 0 || 'part' in rows[0] };
   },
 
   // ---- 有声书：文件太大，不能经过本接口，所以只发“一次性上传地址”，由浏览器直接传到 Storage ----
@@ -265,6 +267,24 @@ const actions = {
       await fetch(base + '/storage/v1/object/audio/' + rows[0].audio_path, { method: 'DELETE', headers: sh }).catch(() => {});
     }
     return { ok: true };
+  },
+
+  // 把第 from 到第 to 章归到同一个“部分”（卷）；part 留空 = 取消分组
+  async set_part({ book_id, from, to, part }) {
+    needId(book_id);
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) throw bad('章节范围不正确');
+    const name = typeof part === 'string' && part.trim() !== '' ? part.trim() : null;
+    if (name && (name.length > 100 || name.includes('\uFFFD') || name.includes('\u0000'))) throw bad('部分名不正确');
+    try {
+      const rows = await db('PATCH', 'chapters', {
+        params: { book_id: 'eq.' + book_id, and: '(chapter_number.gte.' + from + ',chapter_number.lte.' + to + ')', select: 'id' },
+        body: { part: name }, prefer: 'return=representation'
+      });
+      return { ok: true, count: rows ? rows.length : 0 };
+    } catch (e) {
+      if (/part/i.test(e.message)) throw bad('数据库还没有“部分”这一列：请先在 Supabase 的 SQL Editor 运行 alter table chapters add column if not exists part text;');
+      throw e;
+    }
   },
 
   async get_chapter({ id }) {
