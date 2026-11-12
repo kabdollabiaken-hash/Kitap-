@@ -4,6 +4,7 @@ import { storage } from './storage.js';
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { getLang } from './i18n.js';
 import { h, enc } from './ui.js';
+import { fetchParts } from './parts.js';
 
 const TX = {
   kk: { listen: 'Тыңдау', title: 'Тыңдау', speed: 'Жылдамдық', timer: 'Таймер', off: 'Өшірулі', min: ' мин', end: 'Тарау соңы', chapters: 'Тараулар', read: 'Оқу', close: 'Жабу', err: 'Аудио ойнатылмады', prev: 'Алдыңғы', next: 'Келесі', collapse: 'Жасыру' },
@@ -26,7 +27,7 @@ audio.preload = 'none';
 const S = {
   bookId: '', book: null, list: [], idx: -1,
   closed: true, collapsed: false, side: 'right', y: null,
-  rate: 1, sleepAt: 0, sleepEnd: false, sleepTimer: 0, sleepPreset: 0
+  rate: 1, sleepAt: 0, sleepEnd: false, sleepTimer: 0, sleepPreset: 0, parts: new Map()
 };
 const listeners = new Set();
 const emit = () => listeners.forEach((f) => { try { f(); } catch (e) { /* ignore */ } });
@@ -78,6 +79,8 @@ function savePos(force) {
 function setTrack(q, i) {
   savePos(true);
   S.bookId = q.book ? q.book.id : S.bookId; S.book = q.book; S.list = q.list; S.idx = i;
+  const bid = S.bookId;
+  fetchParts(bid).then((m) => { if (S.bookId === bid) S.parts = m; });
   const c = cur();
   const pos = storage.getAudioPos(c.id);
   const startAt = pos && pos.t > 3 && (!pos.d || pos.t < pos.d - 3) ? pos.t : 0;
@@ -365,7 +368,14 @@ function openSheet(kind) {
     items = TIMERS.map((m) => opt(m === 0 ? t.off : (m === -1 ? t.end : m + t.min), m === S.sleepPreset, () => setSleep(m)));
   } else {
     title = t.chapters;
-    items = S.list.map((c, i) => opt(c.chapter_number + '. ' + c.title, i === S.idx, () => go(i)));
+    items = [];
+    let lastPart = null;
+    S.list.forEach((c, i) => {
+      const pn = S.parts.get(c.id) || '';
+      if (pn && pn !== lastPart) items.push(h('div', { dir: 'auto', style: 'padding:10px 18px 4px;font-size:13px;opacity:.6' }, pn));
+      lastPart = pn;
+      items.push(opt(c.chapter_number + '. ' + c.title, i === S.idx, () => go(i)));
+    });
   }
   const lst = h('div', { class: 'lst' }, items);
   sh.replaceChildren(h('h3', {}, title), lst);
