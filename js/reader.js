@@ -9,6 +9,16 @@ import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { h, enc } from './ui.js';
 import { createAudio } from './audio.js';
 import { createMarkUI } from './notes.js';
+import { isLoggedIn, login } from './auth.js';
+import { fetchParts, groupList } from './parts.js';
+
+const TRIAL_CHAPTERS = 1; // 没登录的读者可以免费试读前几章
+const GATE_TX = {
+  kk: { title: 'Оқуды жалғастыру үшін кіріңіз', body: 'Әр кітаптың алғашқы тарауын кірмей-ақ оқуға болады.', btn: 'Google арқылы кіру', back: 'Кітапқа оралу' },
+  ru: { title: 'Войдите, чтобы читать дальше', body: 'Первую главу каждой книги можно читать без входа.', btn: 'Войти через Google', back: 'К книге' },
+  zh: { title: '登录后继续阅读', body: '每本书的前面章节可以免登录试读。', btn: '用谷歌账号登录', back: '返回书籍' },
+  en: { title: 'Sign in to keep reading', body: 'The first chapter of every book is free to read without signing in.', btn: 'Sign in with Google', back: 'Back to the book' }
+};
 
 if (!document.querySelector('link[data-paging]')) {
   const l = document.createElement('link');
@@ -731,6 +741,7 @@ export function viewReader(params) {
           h('span', { lang: cTag, dir: 'auto' }, c.title)));
     }));
     const tocSheet = makeSheet(t('book.contents'), toc);
+    fetchParts(book.id).then((parts) => groupList(toc, parts, chapter.id)); // 有分部（卷）的书：目录分两级
 
     // ---- 设置 ----
     const settingsBody = h('div');
@@ -1041,6 +1052,7 @@ export function viewReader(params) {
     setTimeout(() => {
       [idx + 1, idx - 1].forEach((i) => {
         if (disposed || i < 0 || i >= chapters.length) return;
+        if (!isLoggedIn() && i >= TRIAL_CHAPTERS) return;
         getChapterCached(book.id, chapters[i].id).catch(() => {});
       });
     }, 400);
@@ -1145,6 +1157,15 @@ export function viewReader(params) {
       }
       const idx = chapters.findIndex((c) => c.id === chapterId);
       if (idx < 0) { mount(message('reader.chapterMissing')); return; }
+      if (!isLoggedIn() && idx >= TRIAL_CHAPTERS) { // 试读结束：请登录，登录后回到这一章
+        const g = GATE_TX[(document.documentElement.lang || '').slice(0, 2).toLowerCase()] || GATE_TX.kk;
+        mount(h('div', { class: 'rd-msg' },
+          h('p', {}, h('b', {}, g.title)),
+          h('p', {}, g.body),
+          h('button', { class: 'rd-btn', type: 'button', onclick: () => { try { sessionStorage.setItem('kitap:ret', location.hash); } catch (e) { /* ignore */ } login(); } }, g.btn),
+          h('a', { class: 'rd-btn', href: '#/book/' + enc(book.id) }, g.back)));
+        return;
+      }
       const chapter = await getChapterCached(book.id, chapterId);
       if (disposed) return;
       if (!chapter) { mount(message('reader.chapterMissing')); return; }
