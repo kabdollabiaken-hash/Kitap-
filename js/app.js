@@ -13,6 +13,7 @@ import { viewReader, leaveReader } from './reader.js';
 import { viewMe, viewLogin } from './me.js';
 import { isLoggedIn, onAuth } from './auth.js';
 import { player, audioChapters } from './player.js';
+import { fetchParts, groupList } from './parts.js';
 
 for (const href of ['./css/pages.css', './css/book.css', './css/shelf.css', './css/reader.css', './css/home.css', './css/me.css']) {
   document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'stylesheet', href }));
@@ -675,16 +676,18 @@ function bookDetail(book, chapters, cats) {
     book.description ? descBlock(book.description, tag) : null,
     showCopyright ? h('div', { class: 'bk-meta' }, t('book.copyright') + ': ', h('span', { dir: 'auto' }, book.copyright_note)) : null);
 
-  const toc = chapters.length
-    ? section(t('book.contents'),
-      h('ol', { class: 'toc' }, chapters.map((ch) => {
-        const chTag = langTag({ language: ch.language || book.language, script: ch.script || book.script });
-        return h('li', {},
-          h('a', { href: '#/read/' + enc(book.id) + '/' + enc(ch.id), 'aria-current': resume && resume.id === ch.id ? 'true' : null },
-            h('span', { class: 'num' }, ch.chapter_number + '.'),
-            h('span', { lang: chTag, dir: 'auto' }, ch.title)));
-      })))
+  const tocOl = chapters.length
+    ? h('ol', { class: 'toc' }, chapters.map((ch) => {
+      const chTag = langTag({ language: ch.language || book.language, script: ch.script || book.script });
+      return h('li', {},
+        h('a', { href: '#/read/' + enc(book.id) + '/' + enc(ch.id), 'aria-current': resume && resume.id === ch.id ? 'true' : null },
+          h('span', { class: 'num' }, ch.chapter_number + '.'),
+          h('span', { lang: chTag, dir: 'auto' }, ch.title)));
+    }))
     : null;
+  const toc = tocOl ? section(t('book.contents'), tocOl) : null;
+  // 有分部（卷）的书：目录分成两级，读到哪一部就展开哪一部
+  if (tocOl) fetchParts(book.id).then((parts) => groupList(tocOl, parts, resume ? resume.id : ''));
 
   return h('div', {},
     h('div', { class: 'bk' }, h('div', { class: 'bk-cover' }, cover(book)), info),
