@@ -451,7 +451,7 @@ function chapterPanel(b) {
     listEl.replaceChildren(...chapters.map((c) => {
       const holder = h('div', { class: 'convrow' });
       const show = () => holder.replaceChildren(
-        h('div', { dir: 'auto' }, c.chapter_number + '. ' + c.title + (c.audio_path ? '  🎧' : '')),
+        h('div', { dir: 'auto' }, c.chapter_number + '. ' + c.title + (c.audio_path ? '  🎧' : '') + (c.part ? '  【' + c.part + '】' : '')),
         h('div', { class: 'row' },
           h('button', { class: 'ghost', type: 'button', onclick: edit }, '编辑'),
           h('button', { class: 'danger', type: 'button', onclick: del }, '删除')),
@@ -492,8 +492,25 @@ function chapterPanel(b) {
     try { const r = await api('renumber', { book_id: b.id }); say('✓ 已重新编号' + (r.changed ? '，调整了 ' + r.changed + ' 章' : '，本来就是连续的'), 'ok'); await load(); } catch (e) { say(e.message, 'err'); }
   } }, '重新编号');
 
+  // 批量设置“部分”（卷）：把第几章到第几章归到同一个部分，读者的目录就会分成两级
+  const pFrom = h('input', { type: 'number', min: '1', placeholder: '从第几章', style: 'width:110px' });
+  const pTo = h('input', { type: 'number', min: '1', placeholder: '到第几章', style: 'width:110px' });
+  const pName = h('input', { dir: 'auto', placeholder: '部分名，如 第一部（留空 = 取消分组）' });
+  const pBtn = h('button', { type: 'button', class: 'ghost', onclick: async () => {
+    const from = parseInt(pFrom.value, 10); const to = parseInt(pTo.value, 10);
+    if (!Number.isInteger(from) || !Number.isInteger(to)) { say('请填写从第几章、到第几章', 'err'); return; }
+    pBtn.disabled = true;
+    try {
+      const r = await api('set_part', { book_id: b.id, from, to, part: pName.value });
+      say('✓ 已设置 ' + r.count + ' 章' + (pName.value.trim() ? '，部分名：' + pName.value.trim() : '，已取消分组'), 'ok');
+      await load();
+    } catch (e) { say(e.message, 'err'); }
+    pBtn.disabled = false;
+  } }, '设置部分');
   box.append(h('p', { class: 'muted' }, '点“编辑”可以随意修改这一章的标题和文字。保存后会重新校验，读者马上看到新内容。'),
-    listEl, h('div', { class: 'row' }, addBtn, renum), addBox, msg);
+    listEl, h('div', { class: 'row' }, addBtn, renum),
+    h('p', { class: 'muted' }, '分部（卷）：把连续的章节归到同一个部分。部分名要一字不差。'),
+    h('div', { class: 'row' }, pFrom, pTo, pName, pBtn), addBox, msg);
   load();
   return box;
 }
