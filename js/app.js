@@ -246,32 +246,65 @@ function continueSection() {
   return h('section', { class: 'sec' }, h('h2', {}, t('home.continue')), row);
 }
 
+// ---------- 秒开：先显示上次的内容，同时后台刷新 ----------
+const CACHE_KEY = 'kitap:cache:v1:';
+const cacheGet = (k) => { try { return JSON.parse(localStorage.getItem(CACHE_KEY + k)); } catch (e) { return null; } };
+const cacheSet = (k, v) => { try { localStorage.setItem(CACHE_KEY + k, JSON.stringify(v)); } catch (e) { /* 存不下就算了 */ } };
+const RETRY_TX = { kk: 'Жүктелмеді. Қайталау', ru: 'Не загрузилось. Повторить', zh: '加载失败，点此重试', en: 'Failed to load. Retry' };
+function ensureSkelStyle() {
+  if (document.getElementById('sk-style')) return;
+  const st = document.createElement('style');
+  st.id = 'sk-style';
+  st.textContent = '@keyframes skp{0%,100%{opacity:.55}50%{opacity:1}}.sk-c{background:rgba(128,128,128,.16);border-radius:10px;animation:skp 1.2s ease-in-out infinite}.sk-c i{display:block;padding-top:145%}.sk-c b{display:block;height:10px;margin:8px 6px 10px;border-radius:5px;background:rgba(128,128,128,.2)}.sk-chip{display:inline-block;width:72px;height:36px;border-radius:18px;margin:0 8px 8px 0;background:rgba(128,128,128,.16);animation:skp 1.2s ease-in-out infinite}';
+  document.head.append(st);
+}
+function skeleton(kind, n) {
+  ensureSkelStyle();
+  if (kind === 'chips') return h('div', {}, Array.from({ length: n || 5 }, () => h('span', { class: 'sk-chip' })));
+  return h('div', { class: 'grid', 'aria-hidden': 'true' }, Array.from({ length: n || 6 }, () => h('div', { class: 'sk-c' }, h('i'), h('b'))));
+}
+// key：缓存名；fetchFn：联网取数据；renderFn：数据 → 页面元素（或 null）
+function loadCached(box, key, fetchFn, renderFn, kind, n) {
+  const draw = (data) => {
+    let el = null;
+    try { el = renderFn(data); } catch (e) { /* 缓存格式不对就忽略 */ }
+    if (el) box.replaceChildren(el); else box.replaceChildren();
+  };
+  const old = cacheGet(key);
+  if (old) draw(old); else box.replaceChildren(skeleton(kind, n));
+  const run = () => fetchFn().then((fresh) => {
+    if (!box.isConnected && old) return;
+    const sf = JSON.stringify(fresh);
+    cacheSet(key, fresh);
+    if (old && sf === JSON.stringify(old)) return;
+    draw(fresh);
+  }).catch(() => {
+    if (old) return;
+    const b = h('button', { class: 'btn ghost', type: 'button', onclick: () => { box.replaceChildren(skeleton(kind, n)); run(); } }, RETRY_TX[getLang()] || RETRY_TX.kk);
+    box.replaceChildren(h('p', { class: 'muted' }, b));
+  });
+  run();
+}
+
 function viewHome() {
   const cont = continueSection();
   const root = h('div', {}, h('h1', { class: cont ? 'sr-only' : null }, t('home.title')), cont, followSection());
 
   const catBox = h('div');
   root.append(section(t('home.categories'), catBox));
-  loadInto(catBox, async () => {
-    const cats = await getCategories();
+  loadCached(catBox, 'cats', () => getCategories(), (cats) => {
     if (!cats.length) return null;
     return h('div', { class: 'chips' },
       cats.map((c) => h('a', { class: 'chip', href: libHref({ cat: c.slug }) }, localized(c.name))));
-  });
+  }, 'chips');
 
   const featBox = h('div');
   root.append(section(t('home.featured'), featBox, '#/library'));
-  loadInto(featBox, async () => {
-    const { items } = await listBooks({ featured: true, pageSize: 6 });
-    return items.length ? bookGrid(items) : null;
-  });
+  loadCached(featBox, 'home:feat', () => listBooks({ featured: true, pageSize: 6 }), ({ items }) => (items.length ? bookGrid(items) : null), 'grid', 6);
 
   const newBox = h('div');
   root.append(section(t('home.new'), newBox, '#/library'));
-  loadInto(newBox, async () => {
-    const { items } = await listBooks({ pageSize: 8 });
-    return items.length ? bookGrid(items) : h('p', { class: 'muted' }, t('library.nobooks'));
-  });
+  loadCached(newBox, 'home:new', () => listBooks({ pageSize: 8 }), ({ items }) => (items.length ? bookGrid(items) : h('p', { class: 'muted' }, t('library.nobooks'))), 'grid', 8);
 
   return root;
 }
@@ -285,12 +318,11 @@ function viewLibrary() {
 
   const chipBox = h('div');
   root.append(chipBox);
-  loadInto(chipBox, async () => {
-    const cats = await getCategories();
+  loadCached(chipBox, 'cats', () => getCategories(), (cats) => {
     return h('div', { class: 'chips' },
       h('a', { class: 'chip', href: libHref({ q }), 'aria-current': cat === '' ? 'true' : null }, t('common.all')),
       cats.map((c) => h('a', { class: 'chip', href: libHref({ q, cat: c.slug }), 'aria-current': cat === c.slug ? 'true' : null }, localized(c.name))));
-  });
+  }, 'chips');
 
   if (q) {
     root.append(h('p', { class: 'muted' },
@@ -300,8 +332,7 @@ function viewLibrary() {
 
   const gridBox = h('div');
   root.append(gridBox);
-  loadInto(gridBox, async () => {
-    const { items, hasNext } = await listBooks({ q, categorySlug: cat, page });
+  loadCached(gridBox, 'lib:' + q + '|' + cat + '|' + page, () => listBooks({ q, categorySlug: cat, page }), ({ items, hasNext }) => {
     const wrap = h('div');
     if (!items.length) {
       wrap.append(h('p', { class: 'muted' }, t(q || cat || page > 1 ? 'library.noresults' : 'library.nobooks')));
@@ -319,7 +350,7 @@ function viewLibrary() {
           : h('span', { class: 'btn ghost disabled', 'aria-disabled': 'true' }, t('pager.next'))));
     }
     return wrap;
-  });
+  }, 'grid', 8);
 
   return root;
 }
