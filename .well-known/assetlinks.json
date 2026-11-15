@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.vercel.kitap_three.twa",
+        "sha256_cert_fingerprints": ["DF:21:D7:50:B1:94:68:D9:79:E7:89:6D:94:25:BB:EB:07:C5:90:E0:81:6D:D1:97:46:F3:11:27:A3:4D:D7:D3"]
+      }
+    }]
