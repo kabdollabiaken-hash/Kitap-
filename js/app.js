@@ -5,7 +5,7 @@ import './messages-me.js';
 import './readtime.js';
 import { storage } from './storage.js';
 import { parseHash, onRouteChange, navigate } from './router.js';
-import { listBooks, getCategories, getBook, getChapterList, langTag } from './api.js';
+import { listBooks, getCategories, getBook, getChapterList, langTag, prefetchBook } from './api.js';
 import { getBooksByIds } from './api-extra.js';
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { h, enc, loadInto } from './ui.js';
@@ -73,11 +73,14 @@ function bookLabel(b) {
 
 function bookCard(b) {
   const tag = langTag(b);
-  return h('a', { class: 'bcard', href: '#/book/' + enc(b.id) },
+  const card = h('a', { class: 'bcard', href: '#/book/' + enc(b.id) },
     cover(b),
     h('div', { class: 'bt', lang: tag, dir: 'auto' }, b.title),
     h('div', { class: 'ba', lang: tag, dir: 'auto' }, b.author),
     h('div', {}, h('span', { class: 'tag' }, bookLabel(b))));
+  card.addEventListener('touchstart', () => prefetchBook(b.id), { passive: true });
+  card.addEventListener('mouseenter', () => prefetchBook(b.id));
+  return card;
 }
 
 const bookGrid = (items) => h('div', { class: 'grid' }, items.map(bookCard));
