@@ -497,6 +497,11 @@ function createPager(o) {
     busy = true;
     run(d.s, d.p, !cancelled && (d.p > 0.3 || v > 0.5) ? 1 : 0);
   };
+  // 拖选文字时浏览器会把裁剪框横向“滚”过去（露出下一页、页面错位）：一滚就拨回原位
+  stage.addEventListener('scroll', (e) => {
+    const t = e.target;
+    if (t && t.nodeType === 1 && (t.scrollLeft || t.scrollTop)) { t.scrollLeft = 0; t.scrollTop = 0; }
+  }, true);
   stage.addEventListener('pointerup', (e) => end(e, false));
   stage.addEventListener('pointercancel', (e) => end(e, true));
 
