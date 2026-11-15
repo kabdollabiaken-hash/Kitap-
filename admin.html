@@ -617,7 +617,7 @@ async function parseChapter(file) {
   return { n, title, content, sha: await sha256(content), bytes: new TextEncoder().encode(content).length };
 }
 
-// ---------- 格式转换（全部在浏览器里完成，不加载任何外部代码） ----------
+  // ---------- 格式转换（全部在浏览器里完成，不加载任何外部代码） ----------
 const MAX_FILE = 60 * 1024 * 1024;
 
 function decodeStrict(u8) {
@@ -926,6 +926,168 @@ async function convertDocx(file) {
   return paras;
 }
 
+// ===== PDF 文字提取核心（纯函数，不依赖 pdf.js） =====
+const PDF_TERM = /[.!?…:;»"”'’)\]]$/;
+const PDF_HEAD = /^(глава|бөлім|тарау|раздел|часть|chapter|part|第\s*[一二三四五六七八九十百零〇0-9]+\s*[章节回卷部])(\s|$|[.:。：、\-–—0-9IVXLCivxlc])/i;
+
+// items: [{s, x, y, w, h}]  → 行 [{t, x, x2, y, h}]
+function pdfLines(items, rtl) {
+  const its = items.filter((i) => i.s !== '' && i.s != null).map((i) => ({ ...i, h: i.h || 10 }));
+  its.sort((a, b) => b.y - a.y);
+  const rows = [];
+  for (const it of its) {
+    const row = rows[rows.length - 1];
+    if (row && Math.abs(row.y - it.y) <= Math.max(2, row.h * 0.45)) row.its.push(it);
+    else rows.push({ y: it.y, h: it.h, its: [it] });
+  }
+  return rows.map((r) => {
+    r.its.sort((a, b) => (rtl ? b.x - a.x : a.x - b.x));
+    let t = '';
+    let prevEnd = null;
+    for (const it of r.its) {
+      if (prevEnd !== null) {
+        const gap = rtl ? prevEnd - (it.x + it.w) : it.x - prevEnd;
+        if (gap > r.h * 0.2 && !/\s$/.test(t) && !/^\s/.test(it.s)) t += ' ';
+      }
+      t += it.s;
+      prevEnd = rtl ? it.x : it.x + it.w;
+    }
+    const xs = r.its.map((i) => i.x);
+    const x2s = r.its.map((i) => i.x + i.w);
+    return { t: t.replace(/[ \t]+/g, ' ').trim(), x: Math.min(...xs), x2: Math.max(...x2s), y: r.y, h: r.h };
+  }).filter((l) => l.t !== '');
+}
+
+const median = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+
+// pagesItems: [[items…]…] → pages: [[{t, lv}…]…]
+function pdfToPages(pagesItems, rtl) {
+  const pagesLines = pagesItems.map((p) => pdfLines(p, rtl));
+  const n = pagesLines.length;
+  // 去页眉页脚 / 页码
+  const key = (l) => l.t.replace(/\d+/g, '#').toLowerCase();
+  const cnt = new Map();
+  pagesLines.forEach((ls) => {
+    const seen = new Set();
+    [...ls.slice(0, 2), ...ls.slice(-2)].forEach((l) => { const k = key(l); if (!seen.has(k)) { seen.add(k); cnt.set(k, (cnt.get(k) || 0) + 1); } });
+  });
+  const thr = Math.max(3, Math.ceil(n * 0.4));
+  const isNoise = (l, idx, len) => {
+    const edge = idx < 2 || idx >= len - 2;
+    if (!edge) return false;
+    if (/^[-–—\s]*\d{1,4}[-–—\s]*$/.test(l.t)) return true;
+    return n >= 4 && cnt.get(key(l)) >= thr;
+  };
+  const cleaned = pagesLines.map((ls) => ls.filter((l, i) => !isNoise(l, i, ls.length)));
+  // 版面参数
+  const allLines = cleaned.flat();
+  const lh = median(allLines.map((l) => l.h)) || 10;
+  const maxW = median(allLines.map((l) => l.x2 - l.x).filter((w) => w > 0).sort((a, b) => b - a).slice(0, Math.max(1, Math.floor(allLines.length / 2)))) || 1;
+  const left = median(allLines.map((l) => (rtl ? -l.x2 : l.x)));
+  const pages = [];
+  let carry = null; // 跨页未结束的段落
+  for (const ls of cleaned) {
+    const out = [];
+    let cur = null;
+    let prev = null;
+    ls.forEach((l, i) => {
+      const head = PDF_HEAD.test(l.t) && l.t.length <= 80;
+      const gap = prev ? Math.abs(prev.y - l.y) - l.h : 0;
+      const indent = (rtl ? -l.x2 : l.x) - left > lh * 1.0;
+      const prevShort = prev && (prev.x2 - prev.x) < maxW * 0.75 && PDF_TERM.test(prev.t);
+      let brk = !cur || head || (prev && PDF_HEAD.test(prev.t) && prev.t.length <= 80) || (prev && gap > lh * 0.9) || indent || prevShort;
+      if (i === 0 && carry && !head && !indent && !PDF_TERM.test(carry.t)) { cur = carry; carry = null; brk = false; }
+      if (brk) {
+        if (cur && cur !== carry && !out.includes(cur)) out.push(cur);
+        if (i === 0 && carry) { out.push(carry); carry = null; }
+        cur = { t: l.t, lv: head ? 1 : 0 };
+      } else if (cur.t) {
+        if (!rtl && /[A-Za-zА-Яа-яЁёӘәҒғҚқҢңӨөҰұҮүҺһІі]-$/.test(cur.t) && /^[a-zа-яёәғқңөұүһі]/.test(l.t)) cur.t = cur.t.slice(0, -1) + l.t;
+        else cur.t += ' ' + l.t;
+      }
+      prev = l;
+    });
+    if (cur) {
+      if (!PDF_TERM.test(cur.t) && !cur.lv) { carry = cur; if (out.includes(cur)) out.pop(); }
+      else if (!out.includes(cur)) out.push(cur);
+    }
+    pages.push(out);
+  }
+  if (carry) { if (pages.length) pages[pages.length - 1].push(carry); }
+  return pages;
+}
+
+// 检查文字质量，返回错误字符串或 ''
+function pdfCheck(pages, rtlExpected) {
+  const text = pages.flat().map((p) => p.t).join('\n');
+  const chars = text.replace(/\s/g, '').length;
+  if (chars < Math.max(50, pages.length * 20)) return '这个 PDF 里几乎没有文字，应该是扫描版（图片）。扫描版需要先做 OCR 才能导入，暂不支持';
+  const bad = (text.match(/[�\u0000-]/g) || []).length;
+  if (bad / chars > 0.005) return '提取出的文字里有 ' + bad + ' 个乱码字符（字体编码问题），为了不让乱码上架，已停止。请换一个文字版 PDF，或者复制文字后用“粘贴文字”';
+  const pres = (text.match(/[ﭐ-﷿ﹰ-﻿]/g) || []).length;
+  if (pres / chars > 0.05) return '这个 PDF 的阿拉伯文字提取后是“显示形式”字母，顺序和连写不可靠，不能原样入库。请换一个文字版（或用 Word / 粘贴文字）';
+  return '';
+}
+
+function pdfChunk(pages, per, fb) {
+  const items = [];
+  for (let i = 0; i < pages.length; i += per) {
+    const slice = pages.slice(i, i + per).flat().map((p) => p.t);
+    if (!slice.length) continue;
+    const a = i + 1, b = Math.min(i + per, pages.length);
+    items.push({ title: fb + ' ' + (a === b ? a : a + '–' + b), content: slice.join('\n\n') });
+  }
+  return items;
+}
+
+function pdfSplit(pages, mode, fb, splitParas) {
+  if (mode === '0') return [{ title: fb, content: pages.flat().map((p) => p.t).join('\n\n') }];
+  if (mode === 'auto' || mode === 'head') {
+    const flat = pages.flat();
+    if (flat.filter((p) => p.lv === 1).length >= 2) return splitParas(flat, 1, fb);
+    if (mode === 'head') return [];
+    return pdfChunk(pages, 10, fb);
+  }
+  return pdfChunk(pages, +mode, fb);
+}
+
+const PDFJS_VER = '3.11.174';
+let pdfjsP = null;
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (pdfjsP) return pdfjsP;
+  const base = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/' + PDFJS_VER + '/';
+  pdfjsP = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = base + 'pdf.min.js';
+    sc.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.js'; res(window.pdfjsLib); };
+    sc.onerror = () => { pdfjsP = null; rej(new Error('PDF 读取组件加载失败（需要能访问 cdnjs.cloudflare.com，或网站的安全策略拦截了它）')); };
+    document.head.append(sc);
+  });
+  return pdfjsP;
+}
+
+async function convertPdf(file, rtl, onProgress) {
+  const lib = await loadPdfJs();
+  let doc;
+  try { doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise; }
+  catch (e) {
+    if (e && e.name === 'PasswordException') throw new Error('这个 PDF 有密码保护，请先去掉密码');
+    throw new Error('不是有效的 PDF 文件：' + (e && e.message ? e.message : e));
+  }
+  const pagesItems = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const tc = await page.getTextContent();
+    pagesItems.push(tc.items.filter((it) => typeof it.str === 'string').map((it) => ({ s: it.str, x: it.transform[4], y: it.transform[5], w: it.width, h: Math.abs(it.transform[3]) || it.height })));
+    if (onProgress) onProgress(i, doc.numPages);
+  }
+  const pages = pdfToPages(pagesItems, rtl);
+  const err = pdfCheck(pages, rtl);
+  if (err) throw new Error(err);
+  return pages;
+}
+
 async function readText(file) {
   return decodeStrict(new Uint8Array(await file.arrayBuffer()));
 }
@@ -947,9 +1109,10 @@ async function viewUpload(box) {
     feat: h('input', { type: 'checkbox' }),
     pub: h('input', { type: 'checkbox', checked: true }),
     rep: h('input', { type: 'checkbox' }),
-    files: h('input', { type: 'file', multiple: true, accept: '.txt,.epub,.docx,.html,.htm,.md,.markdown' }),
+    files: h('input', { type: 'file', multiple: true, accept: '.txt,.epub,.docx,.html,.htm,.md,.markdown,.pdf' }),
     paste: h('textarea', { dir: 'auto', rows: '10', placeholder: '把记事本里的文字复制，粘贴到这里…' }),
     splitMode: h('select', {}, [['md', '按 # 开头的标题行分章（例如：# 第一章）'], ['sep', '按单独一行的 --- 分章（每章第一行是标题）'], ['one', '不分章，整段作为一章']].map(([v, l]) => h('option', { value: v }, l))),
+    pdfMode: h('select', {}, [['auto', '自动（有“Глава / Бөлім / 第X章”标题就按标题，否则每 10 页一章）'], ['head', '只按章节标题分'], ['5', '每 5 页一章'], ['10', '每 10 页一章'], ['20', '每 20 页一章'], ['0', '不分章（整本一章）']].map(([v, l]) => h('option', { value: v }, l))),
     level: h('select', {}, [['auto', '自动'], ['1', '一级标题'], ['2', '二级标题'], ['3', '三级标题'], ['0', '不分章（整本一章）']].map(([v, l]) => h('option', { value: v }, l)))
   };
   const fillScripts = () => {
@@ -965,6 +1128,7 @@ async function viewUpload(box) {
   let conv = null; // conv 模式：{ kind, paras|text, fallback, items }
   const preview = h('div');
   const levelBox = h('div', { style: 'display:none' }, h('label', {}, '按几级标题分章'), f.level);
+  const pdfBox = h('div', { style: 'display:none' }, h('label', {}, 'PDF 分章方式'), f.pdfMode, h('p', { class: 'muted' }, 'PDF 没有真正的章节结构，是靠文字规律猜的。页眉、页脚、页码已自动去掉。请在下面逐章检查，不对的可以合并、拆分、改文字。'));
   const log = h('div');
   const go = h('button', {}, '开始上传');
 
@@ -978,12 +1142,17 @@ async function viewUpload(box) {
     if (conv.kind === 'paras') {
       const L = v === 'auto' ? autoLevel(parasLevelCounts(conv.paras)) : +v;
       setItems(splitParas(conv.paras, L, conv.fallback));
+    } else if (conv.kind === 'pdf') {
+      const list = pdfSplit(conv.pages, f.pdfMode.value, conv.fallback, splitParas);
+      if (!list.length) { preview.replaceChildren(h('p', { class: 'err' }, '没有找到章节标题，请换一种分章方式')); conv.items = []; return; }
+      setItems(list);
     } else if (conv.kind === 'md') {
       const L = v === 'auto' ? autoLevel(mdLevelCounts(conv.text)) : +v;
       setItems(splitMd(conv.text, L, conv.fallback));
     }
   }
   f.level.addEventListener('change', () => { if (conv) applySplit(); });
+  f.pdfMode.addEventListener('change', () => { if (conv && conv.kind === 'pdf') applySplit(); });
 
   function renderConv() {
     const summary = h('p', { class: 'ok' });
@@ -1089,7 +1258,14 @@ async function viewUpload(box) {
   async function handleOne(file, ext) {
     mode = 'conv'; chapters = [];
     const fb = baseName(file.name);
-    if (ext === 'epub') {
+    pdfBox.style.display = ext === 'pdf' ? '' : 'none';
+    if (ext === 'pdf') {
+      levelBox.style.display = 'none';
+      f.pdfMode.value = 'auto';
+      const pages = await convertPdf(file, f.script.value === 'arabic', (i, n) => { preview.replaceChildren(h('p', { class: 'muted' }, '读取 PDF 第 ' + i + ' / ' + n + ' 页…')); });
+      conv = { kind: 'pdf', pages, fallback: fb, items: [] };
+      applySplit();
+    } else if (ext === 'epub') {
       levelBox.style.display = 'none';
       conv = { kind: 'fixed', items: [] };
       setItems(await convertEpub(file));
@@ -1119,7 +1295,7 @@ async function viewUpload(box) {
       const text = f.paste.value.replace(/\r\n?/g, '\n');
       if (text.trim() === '') throw new Error('请先在上面的框里粘贴文字');
       if (text.includes('\uFFFD') || text.includes('\u0000')) throw new Error('文字里有乱码字符或空字符，请检查来源');
-      mode = 'conv'; chapters = [];
+      mode = 'conv'; chapters = []; pdfBox.style.display = 'none';
       const fb = f.title.value.trim() || 'Chapter 1';
       const m = f.splitMode.value;
       if (m === 'md') {
@@ -1146,7 +1322,7 @@ async function viewUpload(box) {
 
   f.files.addEventListener('change', async () => {
     mode = 'none'; chapters = []; conv = null;
-    levelBox.style.display = 'none';
+    levelBox.style.display = 'none'; pdfBox.style.display = 'none';
     const files = [...f.files.files];
     if (!files.length) { preview.replaceChildren(); return; }
     preview.replaceChildren(h('p', { class: 'muted' }, '检查 / 转换文件中…'));
@@ -1154,9 +1330,9 @@ async function viewUpload(box) {
     try {
       if (files.some((x) => x.size > MAX_FILE)) throw new Error('文件超过 60MB');
       if (exts.every((e) => e === 'txt')) await handleTxt(files);
-      else if (files.length === 1 && ['epub', 'docx', 'html', 'htm', 'md', 'markdown'].includes(exts[0])) await handleOne(files[0], exts[0]);
-      else if (exts.includes('doc') || exts.includes('pdf')) throw new Error('暂不支持 .doc 和 PDF。Word 请另存为 .docx');
-      else throw new Error('一次只能选一个 EPUB / Word(.docx) / HTML / Markdown 文件；或者选多个 .txt 章节文件');
+      else if (files.length === 1 && ['epub', 'docx', 'html', 'htm', 'md', 'markdown', 'pdf'].includes(exts[0])) await handleOne(files[0], exts[0]);
+      else if (exts.includes('doc')) throw new Error('暂不支持 .doc。Word 请另存为 .docx');
+      else throw new Error('一次只能选一个 EPUB / Word(.docx) / HTML / Markdown / PDF 文件；或者选多个 .txt 章节文件');
     } catch (e) {
       mode = 'none'; conv = null; chapters = [];
       levelBox.style.display = 'none';
@@ -1224,12 +1400,13 @@ async function viewUpload(box) {
     h('label', { class: 'chk' }, f.feat, '设为推荐'),
     h('label', { class: 'chk' }, f.pub, '校验通过后立即上架'),
     h('label', { class: 'chk' }, f.rep, '覆盖已有的同一本书（同名同作者）'),
-    field('书的文件：多个 .txt 章节文件（001.txt、002.txt…，第 1 行标题，第 2 行空行，第 3 行起正文），或者一个 EPUB / Word(.docx) / HTML / Markdown 文件', f.files),
+    field('书的文件：多个 .txt 章节文件（001.txt、002.txt…，第 1 行标题，第 2 行空行，第 3 行起正文），或者一个 EPUB / Word(.docx) / HTML / Markdown / PDF（文字版）文件', f.files),
     h('p', { class: 'muted' }, '——或者——不用文件，直接粘贴文字（不会有编码问题，原文一个字都不改）：'),
     f.paste,
     field('分章方式', f.splitMode),
     h('div', { class: 'row' }, convBtn),
     levelBox,
+    pdfBox,
     preview,
     h('div', { class: 'row' }, go),
     log));
