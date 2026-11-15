@@ -59,29 +59,29 @@ const mx = () => ME_TX[getLang()] || ME_TX.kk;
 const BD = {
   zh: {
     title: '勋章',
-    cat: { time: '阅读时长', books: '阅读书籍', fin: '读完书籍', days: '阅读天数', streak: '连续阅读' },
-    unit: { time: '小时', books: '本', fin: '本', days: '天', streak: '天' },
+    cat: { time: '阅读时长', books: '阅读书籍', fin: '读完书籍', days: '阅读天数', streak: '连续阅读', shelf: '书架收藏', best: '单日最长' },
+    unit: { time: '小时', books: '本', fin: '本', days: '天', streak: '天', shelf: '本', best: '分钟' },
     reach: (n, u) => '累积达到' + n + u,
-    left: (n, u, c) => (c === 'fin' ? '再读完' : c === 'streak' ? '再连续阅读' : '再阅读') + n + u + '可得'
+    left: (n, u, c) => (c === 'fin' ? '再读完' : c === 'streak' ? '再连续阅读' : c === 'shelf' ? '再收藏' : c === 'best' ? '单日再多读' : '再阅读') + n + u + '可得'
   },
   en: {
     title: 'Badges',
-    cat: { time: 'Reading time', books: 'Books read', fin: 'Books finished', days: 'Reading days', streak: 'Streak' },
-    unit: { time: 'hours', books: 'books', fin: 'books', days: 'days', streak: 'days' },
+    cat: { time: 'Reading time', books: 'Books read', fin: 'Books finished', days: 'Reading days', streak: 'Streak', shelf: 'Bookshelf', best: 'Best day' },
+    unit: { time: 'hours', books: 'books', fin: 'books', days: 'days', streak: 'days', shelf: 'books', best: 'min' },
     reach: (n, u) => n + ' ' + u,
     left: (n, u) => n + ' more ' + u + ' to unlock'
   },
   ru: {
     title: 'Награды',
-    cat: { time: 'Время чтения', books: 'Прочитано книг', fin: 'Дочитано книг', days: 'Дни чтения', streak: 'Серия' },
-    unit: { time: 'ч', books: 'книг', fin: 'книг', days: 'дн.', streak: 'дн.' },
+    cat: { time: 'Время чтения', books: 'Прочитано книг', fin: 'Дочитано книг', days: 'Дни чтения', streak: 'Серия', shelf: 'Полка', best: 'Лучший день' },
+    unit: { time: 'ч', books: 'книг', fin: 'книг', days: 'дн.', streak: 'дн.', shelf: 'книг', best: 'мин' },
     reach: (n, u) => n + ' ' + u,
     left: (n, u) => 'Ещё ' + n + ' ' + u
   },
   kk: {
     title: 'Медальдар',
-    cat: { time: 'Оқу уақыты', books: 'Оқылған кітаптар', fin: 'Аяқталған кітаптар', days: 'Оқу күндері', streak: 'Үздіксіз оқу' },
-    unit: { time: 'сағат', books: 'кітап', fin: 'кітап', days: 'күн', streak: 'күн' },
+    cat: { time: 'Оқу уақыты', books: 'Оқылған кітаптар', fin: 'Аяқталған кітаптар', days: 'Оқу күндері', streak: 'Үздіксіз оқу', shelf: 'Сөре', best: 'Рекорд күн' },
+    unit: { time: 'сағат', books: 'кітап', fin: 'кітап', days: 'күн', streak: 'күн', shelf: 'кітап', best: 'мин' },
     reach: (n, u) => n + ' ' + u,
     left: (n, u) => 'Тағы ' + n + ' ' + u
   }
@@ -94,7 +94,9 @@ const BADGE_CATS = [
   { key: 'books', color: ['#8fe3a8', '#3fae6e'], tiers: [1, 5, 10, 50, 100, 500] },
   { key: 'fin', color: ['#f6a66f', '#df6d2f'], tiers: [1, 5, 10, 50, 100, 200] },
   { key: 'days', color: ['#f7cf6a', '#e29a1e'], tiers: [3, 7, 30, 100, 200, 365] },
-  { key: 'streak', color: ['#f48fb1', '#d8396b'], tiers: [3, 7, 30, 90, 180, 365] }
+  { key: 'streak', color: ['#f48fb1', '#d8396b'], tiers: [3, 7, 30, 90, 180, 365] },
+  { key: 'shelf', color: ['#c3a6f2', '#7b4fd0'], tiers: [1, 5, 10, 30, 50, 100] }, // 书架里的书
+  { key: 'best', color: ['#7fe0d4', '#1e9c8d'], tiers: [30, 60, 120, 180, 300, 480] } // 单日最长阅读，单位：分钟
 ];
 const PREVIEW_COUNT = 3; // 主页卡片上显示几个
 
@@ -133,6 +135,8 @@ const BADGE_ICON = {
   books: '<path d="M39 65c4-2 7.5-2 11 1 3.5-3 7-3 11-1v12c-4-2-7.500-2-11 1-3.500-3-7-3-11-1z M50 66v12" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
   fin: '<path d="M41 72.500l6 6 12-12.500" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>',
   days: '<rect x="41" y="64" width="18" height="15" rx="3" fill="none" stroke="#fff" stroke-width="2.2"/><path d="M41 69.500h18M46 62v4M54 62v4" stroke="#fff" stroke-width="2.200" stroke-linecap="round"/>',
+  shelf: '<path d="M43 63h14v16l-7-4.500-7 4.500z" fill="none" stroke="#fff" stroke-width="2.200" stroke-linejoin="round"/>',
+  best: '<path d="M52.500 62l-9.500 10.500h6.200l-2.200 9 9.800-11.500h-6.300z" fill="#fff" fill-opacity=".92"/>',
   streak: '<path d="M50 63c3 4.500 7.500 7.500 7.500 13a7.500 7.500 0 0 1-15 0c0-3 1.800-4.800 3-6.500 1 1.800 1.800 2.800 2.800 2.800 0-3.800-1-6.500 1.700-9.300z" fill="#fff" fill-opacity=".92"/>'
 };
 
@@ -282,6 +286,16 @@ function longestStreak(map) {
   return best;
 }
 
+// 书架收藏勋章：取历史最多的本数，之后移出书架也不会丢
+function shelfBest(n) {
+  let best = n;
+  try {
+    best = Math.max(n, Number(localStorage.getItem('kitap:badges:shelf')) || 0);
+    localStorage.setItem('kitap:badges:shelf', String(best));
+  } catch (e) { /* ignore */ }
+  return best;
+}
+
 function stats() {
   const map = storage.getReadTime();
   let total = 0; let days = 0;
@@ -304,7 +318,9 @@ function stats() {
   return {
     total, days, streak, week, weekTotal, reading, finished,
     bestStreak: Math.max(streak, longestStreak(map)),
-    shelf: storage.getShelf().length
+    bestDay: Math.max(0, ...Object.values(map).map((v) => Number(v) || 0)),
+    shelf: storage.getShelf().length,
+    shelfBest: shelfBest(storage.getShelf().length)
   };
 }
 
@@ -325,7 +341,9 @@ function badgeValues(st) {
     books: st.reading,
     fin: st.finished,
     days: st.days,
-    streak: st.bestStreak
+    streak: st.bestStreak,
+    shelf: st.shelfBest,
+    best: st.bestDay / 60
   };
 }
 
