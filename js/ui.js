@@ -18,11 +18,17 @@ export function h(tag, attrs = {}, ...kids) {
   return e;
 }
 
-// 异步加载一个区块：加载中 -> 内容 / 错误+重试。fn 返回 null 表示整个区块隐藏
+// 异步加载一个区块：（慢了才显示）加载中 -> 内容 / 错误+重试。fn 返回 null 表示整个区块隐藏
+// 0.25 秒内加载完就不显示“加载中…”，避免一闪而过
 export async function loadInto(box, fn) {
-  box.replaceChildren(h('p', { class: 'muted' }, t('common.loading')));
+  let done = false;
+  const timer = setTimeout(() => {
+    if (!done) box.replaceChildren(h('p', { class: 'muted' }, t('common.loading')));
+  }, 250);
   try {
     const node = await fn();
+    done = true;
+    clearTimeout(timer);
     if (node === null) {
       const sec = box.closest('section');
       if (sec) sec.remove(); else box.replaceChildren();
@@ -30,6 +36,8 @@ export async function loadInto(box, fn) {
     }
     box.replaceChildren(node);
   } catch (e) {
+    done = true;
+    clearTimeout(timer);
     console.error(e);
     box.replaceChildren(h('div', { class: 'card' },
       h('p', { class: 'bad' }, t('common.error')),
