@@ -1,6 +1,6 @@
 // 阅读器：正文原样显示，不转换任何文字
 // 三种翻页方式：仿真翻页（curl）、左右滑动（slide）、上下滚动（scroll）
-import { t } from './i18n.js';
+import { t, getLang } from './i18n.js';
 import './messages-reader.js';
 import './messages-paging.js';
 import { storage } from './storage.js';
@@ -162,6 +162,23 @@ if (!document.querySelector('style[data-rd-font]')) {
   const st = document.createElement('style');
   st.setAttribute('data-rd-font', '1');
   st.textContent = '.rd[data-font] .rd-h,.rd[data-font] .rd-p,.rd[data-font] .rd-note{font-family:var(--rd-font)!important}';
+  document.head.appendChild(st);
+}
+// 两端对齐（默认开）
+const readJust = () => { try { return localStorage.getItem('rd-just') !== '0'; } catch (e) { return true; } };
+const saveJust = (v) => { try { localStorage.setItem('rd-just', v ? '1' : '0'); } catch (e) { /* ignore */ } };
+const JUST_TX = { kk: 'Екі жаққа туралау', ru: 'По ширине', zh: '两端对齐', en: 'Justify' };
+if (!document.querySelector('style[data-rd-just]')) {
+  const st = document.createElement('style');
+  st.setAttribute('data-rd-just', '1');
+  st.textContent = '.rd[data-just] .rd-p{text-align:justify;text-justify:inter-word;-webkit-hyphens:auto;hyphens:auto;overflow-wrap:break-word}';
+  document.head.appendChild(st);
+}
+// 手指一碰到屏幕先让正文“选不上”，按住超过 0.35 秒（长按）再放开，这样轻点不会选字/弹出“轻触搜索”，长按选字照常
+if (!document.querySelector('style[data-rd-ns]')) {
+  const st = document.createElement('style');
+  st.setAttribute('data-rd-ns', '1');
+  st.textContent = '.rd.rd-ns .rd-p,.rd.rd-ns .rd-h{-webkit-user-select:none!important;user-select:none!important;-webkit-touch-callout:none}';
   document.head.appendChild(st);
 }
 let naskhLoading = false;
@@ -546,6 +563,7 @@ export function viewReader(params) {
   let prefs = storage.getPrefs();
   let fontKey = readFont(); // 空 = 读者还没选过
   let bookArabic = false; // 当前书是不是阿拉伯文字
+  let justOn = readJust(); // 两端对齐
   let texKey = readTex(); // 纹理背景，空 = 用普通主题色
   const effFont = () => fontKey || (bookArabic ? 'naskh' : 'default');
   let disposed = false;
@@ -591,6 +609,7 @@ export function viewReader(params) {
     if (fk === 'naskh') loadNaskh();
     if (fk === 'default') { root.removeAttribute('data-font'); root.style.removeProperty('--rd-font'); }
     else { root.setAttribute('data-font', fk); root.style.setProperty('--rd-font', FONT_STACK[fk]); }
+    if (justOn) root.setAttribute('data-just', ''); else root.removeAttribute('data-just');
     if (texKey) {
       ensureTexCss(texKey);
       root.setAttribute('data-tex', texKey);
@@ -769,6 +788,16 @@ export function viewReader(params) {
       applyPrefs();
       drawSettings();
     };
+    const setJust = (v) => {
+      if (v === justOn) return;
+      const r = getRaw();
+      justOn = v;
+      saveJust(v);
+      applyPrefs();
+      drawSettings();
+      if (prefs.pageMode !== 'scroll') renderContent(r, false);
+      else { scrollToRatio(r); updateBar(); }
+    };
     const setFont = (k) => {
       if (k === effFont()) return;
       const r = getRaw();
@@ -808,6 +837,11 @@ export function viewReader(params) {
           h('span', {}, FX('label')),
           h('div', { class: 'rd-seg' }, fontOptions(bookArabic).map((k) =>
             h('button', { class: 'rd-btn', type: 'button', 'aria-pressed': effFont() === k ? 'true' : 'false', onclick: () => setFont(k) }, FX(k))))),
+        h('div', { class: 'rd-row' },
+          h('span', {}, JUST_TX[getLang()] || JUST_TX.kk),
+          h('div', { class: 'rd-seg' },
+            h('button', { class: 'rd-btn', type: 'button', 'aria-pressed': justOn ? 'true' : 'false', onclick: () => setJust(true) }, t('reader.on')),
+            h('button', { class: 'rd-btn', type: 'button', 'aria-pressed': justOn ? 'false' : 'true', onclick: () => setJust(false) }, t('reader.off')))),
         h('div', { class: 'rd-row' },
           h('span', {}, t('reader.margin')),
           h('div', { class: 'rd-seg' }, MARGINS.map((m) =>
@@ -1095,11 +1129,22 @@ export function viewReader(params) {
     // 滚动模式：点划线打开工具条；点别处收起工具条
     // 手指轻点：不让浏览器把点到的字选中（安卓 Chrome 会弹出“点按搜索”）；长按选字不受影响
     let ts = null;
+    let nsOn = 0;
+    let nsOff = 0;
+    const nsClear = () => { clearTimeout(nsOn); clearTimeout(nsOff); };
+    const nsEnd = () => { nsClear(); nsOff = setTimeout(() => root.classList.remove('rd-ns'), 400); };
     listen(host, 'touchstart', (e) => {
+      nsClear();
+      if (e.touches.length === 1) {
+        root.classList.add('rd-ns');
+        nsOn = setTimeout(() => root.classList.remove('rd-ns'), 350); // 按够 0.35 秒 = 长按，放开选字
+      } else root.classList.remove('rd-ns');
       const p = e.touches[0];
       ts = e.touches.length === 1 && p ? { x: p.clientX, y: p.clientY, t: Date.now() } : null;
     }, { passive: true });
+    listen(host, 'touchcancel', nsEnd, { passive: true });
     listen(host, 'touchend', (e) => {
+      nsEnd();
       const c = e.changedTouches[0];
       const q = ts;
       ts = null;
