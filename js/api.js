@@ -17,9 +17,8 @@ async function get(path, params) {
 }
 
 // ---------- 缓存：先给上次的结果（秒开），过期了就在后台刷新 ----------
-// 只缓存书详情和章节目录；5 分钟内不重复请求；同一个请求同时只发一次
+// 只缓存书详情和章节目录；1 分钟内不重复请求；更老的先等最新结果 0.8 秒，来不及才先给旧的；同一个请求同时只发一次
 const SWR_PREFIX = 'kitap:api:v1:';
-const FRESH_MS = 5 * 60 * 1000;
 const inflight = new Map();
 const mem = new Map();
 function swrRead(key) {
@@ -44,11 +43,16 @@ function swr(key, fetcher) {
     inflight.set(key, p);
     return p;
   };
-  if (hit) {
-    if (Date.now() - hit.t > FRESH_MS) refresh().catch(() => {});
-    return Promise.resolve(hit.d);
-  }
-  return refresh();
+  // 没缓存，或缓存是空的（0 章、空目录）：一定等最新结果，不能拿旧的空数据糊弄
+  const empty = hit && (hit.d == null || (Array.isArray(hit.d) && hit.d.length === 0));
+  if (!hit || empty) return refresh();
+  // 1 分钟内的缓存直接用；更老的：先等最新结果 0.8 秒，来不及才先给旧的（新的在后台继续更新缓存）
+  if (Date.now() - hit.t < 60 * 1000) return Promise.resolve(hit.d);
+  const fresh = refresh();
+  return Promise.race([
+    fresh.catch(() => hit.d),
+    new Promise((res) => setTimeout(() => res(hit.d), 800))
+  ]);
 }
 
 let catCache = null;
