@@ -65,6 +65,9 @@ function cover(b) {
     h('span', { lang: langTag(b), dir: 'auto' }, b.title));
 }
 
+const ONGOING_TX = { kk: 'Жалғасуда', ru: 'Обновляется', zh: '更新中', en: 'Ongoing' };
+const ongoingText = () => ONGOING_TX[getLang()] || ONGOING_TX.kk;
+
 function bookLabel(b) {
   let label = t('langname.' + b.language);
   if (b.language === 'kk') label += ' · ' + t('script.' + b.script);
@@ -73,11 +76,11 @@ function bookLabel(b) {
 
 function bookCard(b) {
   const tag = langTag(b);
+  const cv = cover(b);
+  if (b.is_ongoing) cv.append(h('span', { class: 'bk-ongoing' }, ongoingText()));
   const card = h('a', { class: 'bcard', href: '#/book/' + enc(b.id) },
-    cover(b),
-    h('div', { class: 'bt', lang: tag, dir: 'auto' }, b.title),
-    h('div', { class: 'ba', lang: tag, dir: 'auto' }, b.author),
-    h('div', {}, h('span', { class: 'tag' }, bookLabel(b))));
+    cv,
+    h('div', { class: 'bt', lang: tag, dir: 'auto' }, b.title));
   card.addEventListener('touchstart', () => prefetchBook(b.id), { passive: true });
   card.addEventListener('mouseenter', () => prefetchBook(b.id));
   return card;
@@ -423,7 +426,7 @@ const MORE_TX = {
 };
 async function fetchBooks(params) {
   const url = new URL(SUPABASE_URL + '/rest/v1/books');
-  url.searchParams.set('select', 'id,title,author,cover_url,language,script,series_no');
+  url.searchParams.set('select', 'id,title,author,cover_url,language,script,series_no,is_ongoing');
   url.searchParams.set('status', 'eq.published');
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   const r = await fetch(url, { headers: { apikey: SUPABASE_KEY } });
@@ -703,6 +706,7 @@ function bookDetail(book, chapters, cats) {
     editionSwitch(book),
     h('div', {},
       h('span', { class: 'tag' }, bookLabel(book)),
+      book.is_ongoing ? h('span', { class: 'tag' }, ongoingText()) : null,
       cat ? h('span', { class: 'tag' }, localized(cat.name)) : null),
     h('div', { class: 'bk-actions' }, startEl, shelfBtn, listenSlot, status),
     resume ? h('div', { class: 'bk-meta' }, t('book.progress', { n: resume.chapter_number, p: Math.round(progress.ratio * 100) })) : null,
@@ -719,8 +723,8 @@ function bookDetail(book, chapters, cats) {
           h('span', { lang: chTag, dir: 'auto' }, ch.title)));
     }))
     : null;
-  // 章节多的书：目录默认只显示前 5 章，点按钮展开全部 / 收起
-  const TOC_LIMIT = 5;
+  // 章节多的书：目录默认只显示前 10 章，点按钮展开全部 / 收起
+  const TOC_LIMIT = 10;
   const TOC_TX = { kk: ['Барлығын көрсету', 'Жасыру'], ru: ['Показать все', 'Свернуть'], zh: ['展开全部', '收起'], en: ['Show all', 'Collapse'] };
   let tocBtn = null;
   let tocLis = [];
