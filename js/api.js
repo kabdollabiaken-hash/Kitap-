@@ -3,7 +3,7 @@ import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 
 const REST = SUPABASE_URL + '/rest/v1/';
 export const PAGE_SIZE = 24;
-const BOOK_FIELDS = 'id,title,author,description,cover_url,category_id,language,script,text_direction,published_at';
+const BOOK_FIELDS = 'id,title,author,description,cover_url,category_id,language,script,text_direction,published_at,is_ongoing';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const isUuid = (s) => UUID.test(String(s));
