@@ -719,9 +719,34 @@ function bookDetail(book, chapters, cats) {
           h('span', { lang: chTag, dir: 'auto' }, ch.title)));
     }))
     : null;
-  const toc = tocOl ? section(t('book.contents'), tocOl) : null;
-  // 有分部（卷）的书：目录分成两级，读到哪一部就展开哪一部
-  if (tocOl) fetchParts(book.id).then((parts) => groupList(tocOl, parts, resume ? resume.id : ''));
+  // 章节多的书：目录默认只显示前 5 章，点按钮展开全部 / 收起
+  const TOC_LIMIT = 5;
+  const TOC_TX = { kk: ['Барлығын көрсету', 'Жасыру'], ru: ['Показать все', 'Свернуть'], zh: ['展开全部', '收起'], en: ['Show all', 'Collapse'] };
+  let tocBtn = null;
+  let tocLis = [];
+  if (tocOl && chapters.length > TOC_LIMIT) {
+    tocLis = [...tocOl.children];
+    const tx = TOC_TX[getLang()] || TOC_TX.kk;
+    let open = false;
+    const paint = () => {
+      tocLis.forEach((li, i) => { li.hidden = !open && i >= TOC_LIMIT; });
+      tocBtn.textContent = open ? tx[1] : tx[0] + ' (' + chapters.length + ')';
+      tocBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    tocBtn = h('button', { class: 'btn ghost', type: 'button', style: 'width:100%;justify-content:center;margin-block-start:10px', onclick: () => { open = !open; paint(); } });
+    paint();
+  }
+  const toc = tocOl ? section(t('book.contents'), h('div', {}, tocOl, tocBtn)) : null;
+  // 有分部（卷）的书：目录分成两级，读到哪一部就展开哪一部（分部自己能折叠，就不用上面的“展开全部”了）
+  if (tocOl) {
+    fetchParts(book.id).then((parts) => {
+      if (parts && parts.size) {
+        if (tocBtn) tocBtn.remove();
+        tocLis.forEach((li) => { li.hidden = false; });
+      }
+      groupList(tocOl, parts, resume ? resume.id : '');
+    });
+  }
 
   return h('div', {},
     h('div', { class: 'bk' }, h('div', { class: 'bk-cover' }, cover(book)), info),
