@@ -55,6 +55,24 @@ function swr(key, fetcher) {
   ]);
 }
 
+// 同时取回“总数”：用 Prefer: count=exact，从 Content-Range 里读出 “0-23/24”
+async function getWithCount(path, params) {
+  const url = new URL(REST + path);
+  for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, v);
+  const r = await fetch(url, { headers: { apikey: SUPABASE_KEY, Prefer: 'count=exact' } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const rows = await r.json();
+  const m = /\/(\d+)$/.exec(r.headers.get('content-range') || '');
+  return { rows, total: m ? parseInt(m[1], 10) : rows.length };
+}
+
+// 书库排序：mix 推荐的在前再按新旧；new 最新上架；title 按书名
+const SORTS = {
+  mix: 'is_featured.desc,published_at.desc.nullslast,created_at.desc',
+  new: 'published_at.desc.nullslast,created_at.desc',
+  title: 'title.asc'
+};
+
 let catCache = null;
 export async function getCategories() {
   if (!catCache) {
@@ -70,15 +88,16 @@ function likeTerm(term) {
   return '"*' + esc.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '*"';
 }
 
-export async function listBooks({ q, categorySlug, page = 1, pageSize = PAGE_SIZE, featured = false } = {}) {
+export async function listBooks({ q, categorySlug, page = 1, pageSize = PAGE_SIZE, featured = false, done = false, sort = 'new' } = {}) {
   const params = {
     select: BOOK_FIELDS,
     status: 'eq.published',
-    order: 'published_at.desc.nullslast,created_at.desc',
+    order: SORTS[sort] || SORTS.new,
     limit: String(pageSize + 1), // 多取一条，用来判断有没有下一页
     offset: String((page - 1) * pageSize)
   };
   if (featured) params.is_featured = 'eq.true';
+  if (done) params.is_ongoing = 'eq.false'; // 已完结：没有标“更新中”的书
   if (q) {
     const p = likeTerm(q);
     params.or = '(title.ilike.' + p + ',author.ilike.' + p + ')';
@@ -89,8 +108,8 @@ export async function listBooks({ q, categorySlug, page = 1, pageSize = PAGE_SIZ
     if (!c) return { items: [], hasNext: false };
     params.category_id = 'eq.' + c.id;
   }
-  const rows = await get('books', params);
-  return { items: rows.slice(0, pageSize), hasNext: rows.length > pageSize };
+  const { rows, total } = await getWithCount('books', params);
+  return { items: rows.slice(0, pageSize), hasNext: rows.length > pageSize, total };
 }
 
 // 单本书详情；不存在或未发布返回 null（null 不缓存）
