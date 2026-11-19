@@ -327,12 +327,19 @@ const SCRIPT_TILES = [
 const SCRIPT_NAME = {};
 SCRIPT_TILES.forEach((x) => { SCRIPT_NAME[x.lang + '|' + x.script] = x; });
 
+const KK_TX = { kk: 'Қазақ тілі', ru: 'Казахский язык', zh: '哈萨克语', en: 'Kazakh' };
 function scriptTiles() {
-  return h('div', { class: 'script-grid' }, SCRIPT_TILES.map((x) =>
-    h('a', { class: 'script-tile', href: libHref({ lang: x.lang, script: x.script }) },
-      h('span', { class: 'st-glyph', lang: x.tag, dir: 'auto' }, x.glyph),
-      h('span', { class: 'st-name', lang: x.tag, dir: 'auto' }, x.name),
-      x.sub ? h('span', { class: 'st-sub', lang: x.tag, dir: 'auto' }, x.sub) : null)));
+  const seg = (x) => h('a', { class: 'ss-seg', href: libHref({ lang: x.lang, script: x.script }) },
+    h('span', { class: 'ss-glyph', lang: x.tag, dir: 'auto' }, x.glyph),
+    h('span', { class: 'ss-name', lang: x.tag, dir: 'auto' }, x.name));
+  const pill = (x) => h('a', { class: 'ss-pill', href: libHref({ lang: x.lang, script: x.script }) },
+    h('span', { class: 'ss-dot', lang: x.tag, dir: 'auto' }, x.glyph),
+    h('span', { class: 'ss-pname', lang: x.tag, dir: 'auto' }, x.name));
+  return h('div', { class: 'ss' },
+    h('div', { class: 'ss-kk' },
+      h('div', { class: 'ss-kk-h' }, KK_TX[getLang()] || KK_TX.kk),
+      h('div', { class: 'ss-segs' }, SCRIPT_TILES.slice(0, 3).map(seg))),
+    h('div', { class: 'ss-row' }, SCRIPT_TILES.slice(3).map(pill)));
 }
 
 const LIB_TX = {
