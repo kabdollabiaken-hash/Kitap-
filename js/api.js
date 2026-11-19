@@ -88,7 +88,7 @@ function likeTerm(term) {
   return '"*' + esc.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '*"';
 }
 
-export async function listBooks({ q, categorySlug, page = 1, pageSize = PAGE_SIZE, featured = false, done = false, sort = 'new' } = {}) {
+export async function listBooks({ q, categorySlug, page = 1, pageSize = PAGE_SIZE, featured = false, done = false, sort = 'new', language = '', script = '' } = {}) {
   const params = {
     select: BOOK_FIELDS,
     status: 'eq.published',
@@ -97,6 +97,8 @@ export async function listBooks({ q, categorySlug, page = 1, pageSize = PAGE_SIZ
     offset: String((page - 1) * pageSize)
   };
   if (featured) params.is_featured = 'eq.true';
+  if (language) params.language = 'eq.' + language;
+  if (script) params.script = 'eq.' + script;
   if (done) params.is_ongoing = 'eq.false'; // 已完结：没有标“更新中”的书
   if (q) {
     const p = likeTerm(q);
