@@ -356,7 +356,7 @@ function chapterForm(title0, content0, onSave, onCancel) {
     const content = ta.value;
     if (title.trim() === '') { msg.className = 'err'; msg.textContent = '标题不能为空'; return; }
     if (content.trim() === '') { msg.className = 'err'; msg.textContent = '正文不能为空'; return; }
-    if (content.includes(' ') || content.includes('\u0000') || title.includes(' ')) { msg.className = 'err'; msg.textContent = '含有乱码字符或空字符，请先修掉'; return; }
+    if (content.includes('\uFFFD') || content.includes('\u0000') || title.includes('\uFFFD')) { msg.className = 'err'; msg.textContent = '含有乱码字符或空字符，请先修掉'; return; }
     if (utf8len(content) > MAXCH) { msg.className = 'err'; msg.textContent = '这一章超过 3.5MB，请拆成两章'; return; }
     save.disabled = true; msg.className = 'muted'; msg.textContent = '保存并校验中…';
     try { await onSave(title, content); } catch (e) { msg.className = 'err'; msg.textContent = e.message; save.disabled = false; }
@@ -607,7 +607,7 @@ async function parseChapter(file) {
   let text;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (e) { throw new Error('不是有效的 UTF-8 编码'); }
   if (text.includes('\u0000')) throw new Error('含有空字符，文件可能已损坏');
-  if (text.includes(' ')) throw new Error('含有乱码字符  ，请先修复源文件');
+  if (text.includes('\uFFFD')) throw new Error('含有乱码字符，请先修复源文件');
   const m = file.name.match(/^(\d+)/);
   if (!m) throw new Error('文件名必须以数字开头，例如 001.txt');
   const n = parseInt(m[1], 10);
@@ -713,7 +713,7 @@ function autoLevel(counts) {
   for (const L of [1, 2, 3]) if ((counts[L] || 0) >= 2) return L;
   return 0;
 }
-function parasLevelCounts(paras) {
+  function parasLevelCounts(paras) {
   const c = {};
   paras.forEach((p) => { if (p.lv) c[p.lv] = (c[p.lv] || 0) + 1; });
   return c;
@@ -1026,9 +1026,9 @@ function pdfCheck(pages, rtlExpected) {
   const text = pages.flat().map((p) => p.t).join('\n');
   const chars = text.replace(/\s/g, '').length;
   if (chars < Math.max(50, pages.length * 20)) return '这个 PDF 里几乎没有文字，应该是扫描版（图片）。扫描版需要先做 OCR 才能导入，暂不支持';
-  const bad = (text.match(/[ \u0000-]/g) || []).length;
+  const bad = (text.match(/[\uFFFD\u0000\uE000-\uF8FF]/g) || []).length;
   if (bad / chars > 0.005) return '提取出的文字里有 ' + bad + ' 个乱码字符（字体编码问题），为了不让乱码上架，已停止。请换一个文字版 PDF，或者复制文字后用“粘贴文字”';
-  const pres = (text.match(/[ﭐ-﷿ﹰ-﻿]/g) || []).length;
+  const pres = (text.match(/[\uFB50-\uFDFF\uFE70-\uFEFF]/g) || []).length;
   if (pres / chars > 0.05) return '这个 PDF 的阿拉伯文字提取后是“显示形式”字母，顺序和连写不可靠，不能原样入库。请换一个文字版（或用 Word / 粘贴文字）';
   return '';
 }
@@ -1225,7 +1225,11 @@ async function viewUpload(box) {
     for (const it of sel) {
       n++;
       if (!it.title.trim()) throw new Error('第 ' + n + ' 章标题为空');
-      if (it.title.includes(' ') || it.content.includes(' ') || it.content.includes('\u0000')) throw new Error('第 ' + n + ' 章含有乱码或空字符，已停止');
+      const bad = (x) => x.search(/[\uFFFD\u0000]/);
+      const bt = bad(it.title);
+      const bc = bad(it.content);
+      if (bt >= 0) throw new Error('第 ' + n + ' 章的标题里有乱码或空字符（第 ' + (bt + 1) + ' 个字符），已停止');
+      if (bc >= 0) throw new Error('第 ' + n + ' 章正文里有乱码或空字符（第 ' + (bc + 1) + ' 个字符附近：“' + it.content.slice(Math.max(0, bc - 12), bc + 12).replace(/[\uFFFD\u0000]/g, '█') + '”），已停止');
       if (it.bytes > MAXCH) throw new Error('第 ' + n + ' 章超过 3.5MB');
       out.push({ n, title: it.title, content: it.content, sha: await sha256(it.content), bytes: it.bytes });
     }
