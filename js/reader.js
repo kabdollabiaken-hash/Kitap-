@@ -682,7 +682,7 @@ export function viewReader(params) {
       while ((mm = re.exec(src))) { push(pos, mm.index); pos = mm.index + mm[0].length; }
       push(pos, src.length);
     }
-    const showCopyright = book.copyright_note && !String(book.copyright_note).startsWith('__');
+    // 版权来源不在章节末尾显示（后台仍保存）
 
     // 划线和想法
     let layers = null; // 分页模式：[A, B] 两层
@@ -703,8 +703,7 @@ export function viewReader(params) {
   const flowNodes = () => [
   integrityBad ? h('div', { class: 'rd-warn', role: 'alert' }, t('reader.integrity')) : null,
   h('h1', { class: 'rd-h', dir: 'auto', style: 'text-align:center' }, chapter.title),
-  blocks.map((b) => h('p', { class: 'rd-p', dir: dirMode, 'data-s': String(b.start) }, ui.paragraph(b.text, b.start))),
-  showCopyright ? h('div', { class: 'rd-note' }, t('book.copyright') + ': ', h('span', { dir: 'auto' }, book.copyright_note)) : null
+  blocks.map((b) => h('p', { class: 'rd-p', dir: dirMode, 'data-s': String(b.start) }, ui.paragraph(b.text, b.start)))
   ].flat(Infinity).filter(Boolean);
 
     // ---- 进度条 ----
