@@ -44,10 +44,12 @@ function section(title, content, moreHref) {
     content);
 }
 
-function libHref({ q, cat, page, done, sort } = {}) {
+function libHref({ q, cat, page, done, sort, lang, script } = {}) {
   const p = new URLSearchParams();
   if (q) p.set('q', q);
   if (cat) p.set('cat', cat);
+  if (lang) p.set('lang', lang);
+  if (script) p.set('script', script);
   if (done) p.set('done', '1');
   if (sort && sort !== 'mix') p.set('sort', sort);
   if (page > 1) p.set('page', String(page));
@@ -299,13 +301,7 @@ function viewHome() {
   const cont = continueSection();
   const root = h('div', {}, h('h1', { class: cont ? 'sr-only' : null }, t('home.title')), cont, followSection());
 
-  const catBox = h('div');
-  root.append(section(t('home.categories'), catBox));
-  loadCached(catBox, 'cats', () => getCategories(), (cats) => {
-    if (!cats.length) return null;
-    return h('div', { class: 'chips' },
-      cats.map((c) => h('a', { class: 'chip', href: libHref({ cat: c.slug }) }, localized(c.name))));
-  }, 'chips');
+  root.append(section(SCRIPT_TX[getLang()] || SCRIPT_TX.kk, scriptTiles()));
 
   const featBox = h('div');
   root.append(section(t('home.featured'), featBox, '#/library'));
@@ -316,6 +312,27 @@ function viewHome() {
   loadCached(newBox, 'home:new', () => listBooks({ pageSize: 8 }), ({ items }) => (items.length ? bookGrid(items) : h('p', { class: 'muted' }, t('library.nobooks'))), 'grid', 8);
 
   return root;
+}
+
+// 首页“按文字阅读”：6 个入口，点进去只看该语言/文字的书
+const SCRIPT_TX = { kk: 'Жазу түрі бойынша', ru: 'По письменности', zh: '按文字阅读', en: 'Browse by script' };
+const SCRIPT_TILES = [
+  { lang: 'kk', script: 'cyrillic', glyph: '\u04d8\u04d9', name: 'Кирилл', sub: 'Қазақша', tag: 'kk-Cyrl' },
+  { lang: 'kk', script: 'latin', glyph: '\u00c4\u00e4', name: 'Латын', sub: 'Qazaqsha', tag: 'kk-Latn' },
+  { lang: 'kk', script: 'arabic', glyph: '\u0627\u0628', name: 'Төте жазу', sub: '\u0642\u0627\u0632\u0627\u0642\u0634\u0627', tag: 'kk-Arab' },
+  { lang: 'ru', script: 'cyrillic', glyph: 'Яя', name: 'Русский', sub: '', tag: 'ru' },
+  { lang: 'zh', script: 'han', glyph: '汉', name: '中文', sub: '', tag: 'zh' },
+  { lang: 'en', script: 'latin', glyph: 'Aa', name: 'English', sub: '', tag: 'en' }
+];
+const SCRIPT_NAME = {};
+SCRIPT_TILES.forEach((x) => { SCRIPT_NAME[x.lang + '|' + x.script] = x; });
+
+function scriptTiles() {
+  return h('div', { class: 'script-grid' }, SCRIPT_TILES.map((x) =>
+    h('a', { class: 'script-tile', href: libHref({ lang: x.lang, script: x.script }) },
+      h('span', { class: 'st-glyph', lang: x.tag, dir: 'auto' }, x.glyph),
+      h('span', { class: 'st-name', lang: x.tag, dir: 'auto' }, x.name),
+      x.sub ? h('span', { class: 'st-sub', lang: x.tag, dir: 'auto' }, x.sub) : null)));
 }
 
 const LIB_TX = {
@@ -330,6 +347,8 @@ function viewLibrary() {
   const cat = route.query.cat || '';
   const page = Math.max(1, parseInt(route.query.page, 10) || 1);
   const done = route.query.done === '1';
+  const lang = route.query.lang || '';
+  const script = route.query.script || '';
   const sort = ['mix', 'new', 'title'].includes(route.query.sort) ? route.query.sort : 'mix';
   const lx = LIB_TX[getLang()] || LIB_TX.kk;
 
@@ -339,26 +358,29 @@ function viewLibrary() {
   root.append(chipBox);
   loadCached(chipBox, 'cats', () => getCategories(), (cats) => {
     return h('div', { class: 'chips' },
-      h('a', { class: 'chip', href: libHref({ q, done, sort }), 'aria-current': cat === '' ? 'true' : null }, t('common.all')),
-      cats.map((c) => h('a', { class: 'chip', href: libHref({ q, cat: c.slug, done, sort }), 'aria-current': cat === c.slug ? 'true' : null }, localized(c.name))));
+      h('a', { class: 'chip', href: libHref({ q, done, sort, lang, script }), 'aria-current': cat === '' ? 'true' : null }, t('common.all')),
+      cats.map((c) => h('a', { class: 'chip', href: libHref({ q, cat: c.slug, done, sort, lang, script }), 'aria-current': cat === c.slug ? 'true' : null }, localized(c.name))));
   }, 'chips');
 
   if (q) {
     root.append(h('p', { class: 'muted' },
       t('library.query') + ': ', h('span', { dir: 'auto' }, q), ' ',
-      h('a', { class: 'link', href: libHref({ cat, done, sort }) }, t('library.clear'))));
+      h('a', { class: 'link', href: libHref({ cat, done, sort, lang, script }) }, t('library.clear'))));
   }
 
   const gridBox = h('div');
   root.append(gridBox);
-  loadCached(gridBox, 'lib:' + q + '|' + cat + '|' + page + '|' + (done ? 1 : 0) + '|' + sort, () => listBooks({ q, categorySlug: cat, page, done, sort }), ({ items, hasNext, total }) => {
+  loadCached(gridBox, 'lib:' + q + '|' + cat + '|' + page + '|' + (done ? 1 : 0) + '|' + sort + '|' + lang + '|' + script, () => listBooks({ q, categorySlug: cat, page, done, sort, language: lang, script }), ({ items, hasNext, total }) => {
     const wrap = h('div');
-    const sel = h('select', { class: 'lib-sort', 'aria-label': lx.sort[sort], onchange: (e) => { location.hash = libHref({ q, cat, done, sort: e.target.value }); } },
+    const sel = h('select', { class: 'lib-sort', 'aria-label': lx.sort[sort], onchange: (e) => { location.hash = libHref({ q, cat, done, sort: e.target.value, lang, script }); } },
       Object.keys(lx.sort).map((k) => h('option', { value: k, selected: k === sort ? '' : null }, lx.sort[k])));
+    const sx = SCRIPT_NAME[lang + '|' + script];
+    if (sx) wrap.append(h('a', { class: 'lib-filter', href: libHref({ q, cat, done, sort }) },
+      h('span', { lang: sx.tag, dir: 'auto' }, sx.name), ' \u2715'));
     wrap.append(h('div', { class: 'lib-bar' },
       h('span', { class: 'lib-count' }, typeof total === 'number' ? lx.count(total) : ''),
       h('div', { class: 'lib-tools' },
-        h('a', { class: 'lib-toggle', href: libHref({ q, cat, done: !done, sort }), 'aria-pressed': done ? 'true' : 'false' }, lx.done),
+        h('a', { class: 'lib-toggle', href: libHref({ q, cat, done: !done, sort, lang, script }), 'aria-pressed': done ? 'true' : 'false' }, lx.done),
         sel)));
     if (!items.length) {
       wrap.append(h('p', { class: 'muted' }, t(q || cat || page > 1 ? 'library.noresults' : 'library.nobooks')));
@@ -368,11 +390,11 @@ function viewLibrary() {
     if (page > 1 || hasNext) {
       wrap.append(h('nav', { class: 'pager' },
         page > 1
-          ? h('a', { class: 'btn ghost', href: libHref({ q, cat, done, sort, page: page - 1 }) }, t('pager.prev'))
+          ? h('a', { class: 'btn ghost', href: libHref({ q, cat, done, sort, lang, script, page: page - 1 }) }, t('pager.prev'))
           : h('span', { class: 'btn ghost disabled', 'aria-disabled': 'true' }, t('pager.prev')),
         h('span', { class: 'muted' }, t('pager.page', { n: page })),
         hasNext
-          ? h('a', { class: 'btn ghost', href: libHref({ q, cat, done, sort, page: page + 1 }) }, t('pager.next'))
+          ? h('a', { class: 'btn ghost', href: libHref({ q, cat, done, sort, lang, script, page: page + 1 }) }, t('pager.next'))
           : h('span', { class: 'btn ghost disabled', 'aria-disabled': 'true' }, t('pager.next'))));
     }
     return wrap;
