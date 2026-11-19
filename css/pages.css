@@ -36,6 +36,12 @@
   background: var(--accent-soft); color: #0a5f52;
 }
 
+.lib-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; margin-block-end: 14px; font-size: 13px; color: var(--muted); }
+.lib-tools { display: flex; align-items: center; gap: 8px; }
+.lib-toggle { padding: 6px 12px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 13px; }
+.lib-toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.lib-sort { border: 0; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; padding: 6px 2px; max-width: 120px; }
+
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-block-end: 20px; }
 .chip {
   padding-inline: 14px; min-height: 40px; display: inline-flex; align-items: center;
