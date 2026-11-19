@@ -44,10 +44,12 @@ function section(title, content, moreHref) {
     content);
 }
 
-function libHref({ q, cat, page } = {}) {
+function libHref({ q, cat, page, done, sort } = {}) {
   const p = new URLSearchParams();
   if (q) p.set('q', q);
   if (cat) p.set('cat', cat);
+  if (done) p.set('done', '1');
+  if (sort && sort !== 'mix') p.set('sort', sort);
   if (page > 1) p.set('page', String(page));
   const s = p.toString();
   return '#/library' + (s ? '?' + s : '');
@@ -80,7 +82,8 @@ function bookCard(b) {
   if (b.is_ongoing) cv.append(h('span', { class: 'bk-ongoing' }, ongoingText()));
   const card = h('a', { class: 'bcard', href: '#/book/' + enc(b.id) },
     cv,
-    h('div', { class: 'bt', lang: tag, dir: 'auto' }, b.title));
+    h('div', { class: 'bt', lang: tag, dir: 'auto' }, b.title),
+    h('div', { class: 'ba', lang: tag, dir: 'auto' }, b.author));
   card.addEventListener('touchstart', () => prefetchBook(b.id), { passive: true });
   card.addEventListener('mouseenter', () => prefetchBook(b.id));
   return card;
@@ -315,10 +318,20 @@ function viewHome() {
   return root;
 }
 
+const LIB_TX = {
+  kk: { count: (n) => 'Барлығы ' + n + ' кітап', done: 'Аяқталған', sort: { mix: 'Іріктеме', new: 'Жаңалары', title: 'Атауы бойынша' } },
+  ru: { count: (n) => 'Всего книг: ' + n, done: 'Завершённые', sort: { mix: 'Подборка', new: 'Новинки', title: 'По названию' } },
+  zh: { count: (n) => '共 ' + n + ' 本书籍', done: '已完结', sort: { mix: '综合排序', new: '最新上架', title: '书名排序' } },
+  en: { count: (n) => n + ' books', done: 'Finished', sort: { mix: 'Featured', new: 'Newest', title: 'Title A–Z' } }
+};
+
 function viewLibrary() {
   const q = (route.query.q || '').trim();
   const cat = route.query.cat || '';
   const page = Math.max(1, parseInt(route.query.page, 10) || 1);
+  const done = route.query.done === '1';
+  const sort = ['mix', 'new', 'title'].includes(route.query.sort) ? route.query.sort : 'mix';
+  const lx = LIB_TX[getLang()] || LIB_TX.kk;
 
   const root = h('div', {}, h('h1', {}, t('library.title')));
 
@@ -326,20 +339,27 @@ function viewLibrary() {
   root.append(chipBox);
   loadCached(chipBox, 'cats', () => getCategories(), (cats) => {
     return h('div', { class: 'chips' },
-      h('a', { class: 'chip', href: libHref({ q }), 'aria-current': cat === '' ? 'true' : null }, t('common.all')),
-      cats.map((c) => h('a', { class: 'chip', href: libHref({ q, cat: c.slug }), 'aria-current': cat === c.slug ? 'true' : null }, localized(c.name))));
+      h('a', { class: 'chip', href: libHref({ q, done, sort }), 'aria-current': cat === '' ? 'true' : null }, t('common.all')),
+      cats.map((c) => h('a', { class: 'chip', href: libHref({ q, cat: c.slug, done, sort }), 'aria-current': cat === c.slug ? 'true' : null }, localized(c.name))));
   }, 'chips');
 
   if (q) {
     root.append(h('p', { class: 'muted' },
       t('library.query') + ': ', h('span', { dir: 'auto' }, q), ' ',
-      h('a', { class: 'link', href: libHref({ cat }) }, t('library.clear'))));
+      h('a', { class: 'link', href: libHref({ cat, done, sort }) }, t('library.clear'))));
   }
 
   const gridBox = h('div');
   root.append(gridBox);
-  loadCached(gridBox, 'lib:' + q + '|' + cat + '|' + page, () => listBooks({ q, categorySlug: cat, page }), ({ items, hasNext }) => {
+  loadCached(gridBox, 'lib:' + q + '|' + cat + '|' + page + '|' + (done ? 1 : 0) + '|' + sort, () => listBooks({ q, categorySlug: cat, page, done, sort }), ({ items, hasNext, total }) => {
     const wrap = h('div');
+    const sel = h('select', { class: 'lib-sort', 'aria-label': lx.sort[sort], onchange: (e) => { location.hash = libHref({ q, cat, done, sort: e.target.value }); } },
+      Object.keys(lx.sort).map((k) => h('option', { value: k, selected: k === sort ? '' : null }, lx.sort[k])));
+    wrap.append(h('div', { class: 'lib-bar' },
+      h('span', { class: 'lib-count' }, typeof total === 'number' ? lx.count(total) : ''),
+      h('div', { class: 'lib-tools' },
+        h('a', { class: 'lib-toggle', href: libHref({ q, cat, done: !done, sort }), 'aria-pressed': done ? 'true' : 'false' }, lx.done),
+        sel)));
     if (!items.length) {
       wrap.append(h('p', { class: 'muted' }, t(q || cat || page > 1 ? 'library.noresults' : 'library.nobooks')));
     } else {
@@ -348,11 +368,11 @@ function viewLibrary() {
     if (page > 1 || hasNext) {
       wrap.append(h('nav', { class: 'pager' },
         page > 1
-          ? h('a', { class: 'btn ghost', href: libHref({ q, cat, page: page - 1 }) }, t('pager.prev'))
+          ? h('a', { class: 'btn ghost', href: libHref({ q, cat, done, sort, page: page - 1 }) }, t('pager.prev'))
           : h('span', { class: 'btn ghost disabled', 'aria-disabled': 'true' }, t('pager.prev')),
         h('span', { class: 'muted' }, t('pager.page', { n: page })),
         hasNext
-          ? h('a', { class: 'btn ghost', href: libHref({ q, cat, page: page + 1 }) }, t('pager.next'))
+          ? h('a', { class: 'btn ghost', href: libHref({ q, cat, done, sort, page: page + 1 }) }, t('pager.next'))
           : h('span', { class: 'btn ghost disabled', 'aria-disabled': 'true' }, t('pager.next'))));
     }
     return wrap;
@@ -696,8 +716,7 @@ function bookDetail(book, chapters, cats) {
     ? h('a', { class: 'btn', href: '#/read/' + enc(book.id) + '/' + enc(target.id) }, t(resume ? 'home.continue' : 'book.start'))
     : h('span', { class: 'btn disabled', 'aria-disabled': 'true' }, t('book.start'));
 
-  // 内部测试标记（以 __ 开头）不显示
-  const showCopyright = book.copyright_note && !String(book.copyright_note).startsWith('__');
+  // 版权来源不在详情页显示（后台仍保存）
 
   const info = h('div', { class: 'bk-info' },
     h('h1', { lang: tag, dir: 'auto' }, book.title),
@@ -711,8 +730,7 @@ function bookDetail(book, chapters, cats) {
     h('div', { class: 'bk-actions' }, startEl, shelfBtn, listenSlot, status),
     resume ? h('div', { class: 'bk-meta' }, t('book.progress', { n: resume.chapter_number, p: Math.round(progress.ratio * 100) })) : null,
     target ? null : h('p', { class: 'bad' }, t('book.nochapters')),
-    book.description ? descBlock(book.description, tag) : null,
-    showCopyright ? h('div', { class: 'bk-meta' }, t('book.copyright') + ': ', h('span', { dir: 'auto' }, book.copyright_note)) : null);
+    book.description ? descBlock(book.description, tag) : null);
 
   const tocOl = chapters.length
     ? h('ol', { class: 'toc' }, chapters.map((ch) => {
