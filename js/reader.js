@@ -37,6 +37,41 @@ const PAGE_GAP = 48;
 const PAD_TOP = 14;
 const PAD_BOTTOM = 26;
 
+// 休息提醒：连续阅读满 30 分钟，在翻页时从顶部淡入一条提示（不遮挡文字，自动消失）
+const REST_MS = 30 * 60 * 1000; // 提醒间隔
+const REST_IDLE = 5 * 60 * 1000; // 超过 5 分钟没翻页，连续计时清零
+const REST_SHOW = 4000;
+const REST_TX = {
+  kk: (m) => m + ' минут үздіксіз оқыдыңыз. Көзіңізге демалыс беріңіз',
+  ru: (m) => 'Вы читаете уже ' + m + ' мин. Дайте глазам отдохнуть',
+  zh: (m) => '已连续阅读 ' + m + ' 分钟，让眼睛休息一下吧',
+  en: (m) => "You've been reading for " + m + ' min. Time to rest your eyes'
+};
+const rest = { start: 0, last: 0, next: 0 };
+if (!document.querySelector('style[data-rd-rest]')) {
+  const st = document.createElement('style');
+  st.setAttribute('data-rd-rest', '');
+  st.textContent = '.rd-rest{position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top,0px));transform:translate(-50%,-8px);max-width:calc(100% - 32px);padding:10px 16px;border-radius:20px;background:rgba(30,36,34,.88);color:#fff;font-size:14px;line-height:1.4;text-align:center;opacity:0;transition:opacity .35s,transform .35s;pointer-events:none;z-index:50}.rd-rest.on{opacity:1;transform:translate(-50%,0)}';
+  document.head.appendChild(st);
+}
+function restTick(root) {
+  const n = Date.now();
+  if (!rest.start || n - rest.last > REST_IDLE) { rest.start = n; rest.next = n + REST_MS; }
+  rest.last = n;
+  if (n < rest.next) return;
+  rest.next = n + REST_MS;
+  const mins = Math.round((n - rest.start) / 60000);
+  const old = root.querySelector('.rd-rest');
+  if (old) old.remove();
+  const el = document.createElement('div');
+  el.className = 'rd-rest';
+  el.setAttribute('role', 'status');
+  el.textContent = (REST_TX[getLang()] || REST_TX.kk)(mins);
+  root.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('on'));
+  setTimeout(() => { el.classList.remove('on'); setTimeout(() => el.remove(), 400); }, REST_SHOW);
+}
+
 let active = null; // 当前阅读器的清理函数（保存进度、移除监听）
 let gotoLast = null; // 从下一章“往回翻”到上一章时，直接打开上一章的最后一页
 const imm = { on: false, at: 0 }; // 沉浸模式（隐藏顶栏和底栏）：翻到下一章时保持，离开阅读器后恢复
@@ -1021,7 +1056,7 @@ export function viewReader(params) {
         stage.style.setProperty('--pg-y', PAD_TOP + 'px');
         pager = createPager({
           stage, A, B, num, W, rtl, mode, anim: prefs.anim, ratio, atLast, label: labelFor,
-          onPage: () => { ui.hide(); updateBar(); queueSave(); },
+          onPage: () => { ui.hide(); updateBar(); queueSave(); restTick(root); },
           onEdge: (fwd) => goChapter(fwd),
           onTap: (x, y) => ui.tap(x, y),
           onCenter: () => toggleImm()
