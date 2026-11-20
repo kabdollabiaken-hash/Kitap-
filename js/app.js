@@ -131,7 +131,7 @@ function renderHeader() {
 
   return h('header', { class: 'topbar' },
     h('div', { class: 'topbar-in' },
-      h('a', { class: 'brand', href: '#/' }, t('brand')),
+      h('a', { class: 'brand', href: '#/' }, brandMark(), h('span', { class: 'brand-tx' }, t('brand'))),
       h('nav', { class: 'nav', 'aria-label': t('nav.aria') },
         NAV.map((n) => h('a', { href: n.href, 'aria-current': n.id === active ? 'page' : null }, t(n.key)))),
       search,
@@ -315,6 +315,20 @@ function viewHome() {
 }
 
 // 首页“按文字阅读”：6 个入口，点进去只看该语言/文字的书
+// 品牌图标：翻开的书 + 嫩芽（用 currentColor，跟随主题）
+function brandMark() {
+  const sp = document.createElement('span');
+  sp.className = 'brand-mk';
+  sp.setAttribute('aria-hidden', 'true');
+  sp.innerHTML = '<svg viewBox="0 0 32 32" width="34" height="34" focusable="false">' +
+    '<path d="M15.3 13.2C11.6 10.8 7 10.6 3 12v13.2c4-1.4 8.6-1.2 12.3 1.2z" fill="currentColor"/>' +
+    '<path d="M16.7 13.2c3.7-2.4 8.3-2.6 12.3-1.2v13.2c-4-1.4-8.6-1.2-12.3 1.2z" fill="currentColor" opacity=".72"/>' +
+    '<path d="M16 12.5V7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>' +
+    '<path d="M16 9.2c-3 .2-4.8-1.6-4.9-4.4 3 0 4.8 1.7 4.9 4.4z" fill="var(--accent-leaf, #5fae8f)"/>' +
+    '<path d="M16 7.4c0-2.8 1.8-4.8 4.8-5 .1 2.9-1.8 4.9-4.8 5z" fill="var(--accent-leaf, #5fae8f)"/></svg>';
+  return sp;
+}
+
 const SCRIPT_TX = { kk: 'Жазу түрі бойынша', ru: 'По письменности', zh: '按文字阅读', en: 'Browse by script' };
 const SCRIPT_TILES = [
   { lang: 'kk', script: 'cyrillic', glyph: '\u04d8\u04d9', name: 'Кирилл', sub: 'Қазақша', tag: 'kk-Cyrl' },
