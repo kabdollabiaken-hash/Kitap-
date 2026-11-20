@@ -332,14 +332,11 @@ function scriptTiles() {
   const seg = (x) => h('a', { class: 'ss-seg', href: libHref({ lang: x.lang, script: x.script }) },
     h('span', { class: 'ss-glyph', lang: x.tag, dir: 'auto' }, x.glyph),
     h('span', { class: 'ss-name', lang: x.tag, dir: 'auto' }, x.name));
-  const pill = (x) => h('a', { class: 'ss-pill', href: libHref({ lang: x.lang, script: x.script }) },
-    h('span', { class: 'ss-dot', lang: x.tag, dir: 'auto' }, x.glyph),
-    h('span', { class: 'ss-pname', lang: x.tag, dir: 'auto' }, x.name));
   return h('div', { class: 'ss' },
     h('div', { class: 'ss-kk' },
       h('div', { class: 'ss-kk-h' }, KK_TX[getLang()] || KK_TX.kk),
       h('div', { class: 'ss-segs' }, SCRIPT_TILES.slice(0, 3).map(seg))),
-    h('div', { class: 'ss-row' }, SCRIPT_TILES.slice(3).map(pill)));
+    null);
 }
 
 const LIB_TX = {
