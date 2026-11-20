@@ -71,3 +71,8 @@
 body [lang="kk-Arab"] { font-family: 'Scheherazade New', serif; line-height: 1.8; }
 body [lang="kk-Cyrl"], body [lang="kk-Latn"], body [lang="ru"], body [lang="en"] { font-family: 'Noto Serif', serif; }
 body [lang="zh"] { font-family: 'Noto Serif SC', serif; }
+
+/* 顶栏品牌：图标 + 文字 */
+.brand { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.brand-mk { display: inline-flex; flex: none; color: var(--accent); }
+.brand-mk svg { display: block; }
