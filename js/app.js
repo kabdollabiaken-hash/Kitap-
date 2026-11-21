@@ -14,6 +14,7 @@ import { viewMe, viewLogin } from './me.js';
 import { isLoggedIn, onAuth } from './auth.js';
 import { player, audioChapters } from './player.js';
 import { fetchParts, groupList } from './parts.js';
+import { offlineHas, offlineSave, offlineRemove } from './offline.js';
 
 for (const href of ['./css/pages.css', './css/book.css', './css/shelf.css', './css/reader.css', './css/home.css', './css/me.css']) {
   document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'stylesheet', href }));
@@ -761,13 +762,12 @@ function bookDetail(book, chapters, cats) {
   const info = h('div', { class: 'bk-info' },
     h('h1', { lang: tag, dir: 'auto' }, book.title),
     h('div', { class: 'bk-author', lang: tag, dir: 'auto' }, book.author),
-    book.author ? h('div', { style: 'margin:4px 0' }, followBtn('authors', book.author)) : null,
     editionSwitch(book),
     h('div', {},
       h('span', { class: 'tag' }, bookLabel(book)),
       book.is_ongoing ? h('span', { class: 'tag' }, ongoingText()) : null,
       cat ? h('span', { class: 'tag' }, localized(cat.name)) : null),
-    h('div', { class: 'bk-actions' }, startEl, shelfBtn, shareBtn(book), listenSlot, status),
+    h('div', { class: 'bk-actions' }, startEl, shelfBtn, bookMoreBtn(book, chapters), listenSlot, status),
     resume ? h('div', { class: 'bk-meta' }, t('book.progress', { n: resume.chapter_number, p: Math.round(progress.ratio * 100) })) : null,
     target ? null : h('p', { class: 'bad' }, t('book.nochapters')),
     book.description ? descBlock(book.description, tag) : null);
@@ -833,20 +833,87 @@ function shareToast(msg) {
   requestAnimationFrame(() => el.classList.add('on'));
   setTimeout(() => { el.classList.remove('on'); setTimeout(() => el.remove(), 300); }, 2200);
 }
-function shareBtn(book) {
+async function doShare(book) {
   const tx = SHARE_TX[getLang()] || SHARE_TX.kk;
-  return h('button', {
-    class: 'btn ghost', type: 'button', 'aria-label': tx.btn,
-    onclick: async () => {
-      const url = location.origin + location.pathname + '#/book/' + enc(book.id);
-      const text = tx.text(book);
-      try {
-        if (navigator.share) { await navigator.share({ title: book.title, text, url }); return; }
-      } catch (e) { if (e && e.name === 'AbortError') return; }
-      try { await navigator.clipboard.writeText(text + '\n' + url); shareToast(tx.copied); }
-      catch (e) { window.prompt(tx.btn, url); }
+  const url = location.origin + location.pathname + '#/book/' + enc(book.id);
+  const text = tx.text(book);
+  try {
+    if (navigator.share) { await navigator.share({ title: book.title, text, url }); return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(text + '\n' + url); shareToast(tx.copied); }
+  catch (e) { window.prompt(tx.btn, url); }
+}
+
+// ---------- 书详情页“更多”菜单：分享 / 下载（离线阅读）/ 关注作者 ----------
+const MENU_TX = {
+  kk: { more: 'Қосымша', dl: 'Жүктеп алу (офлайн оқу)', dling: (a, n) => 'Жүктелуде ' + a + '/' + n, rm: 'Жүктелген кітапты өшіру', start: 'Жүктеу басталды…', ok: 'Жүктелді. Интернетсіз оқуға болады', fail: 'Жүктеу сәтсіз болды. Қайталап көріңіз', removed: 'Жүктелген нұсқа өшірілді', nochap: 'Тарау жоқ', follow: 'Авторды бақылау', following: 'Бақылауда' },
+  ru: { more: 'Ещё', dl: 'Скачать (читать офлайн)', dling: (a, n) => 'Загрузка ' + a + '/' + n, rm: 'Удалить загрузку', start: 'Загрузка началась…', ok: 'Скачано. Можно читать без интернета', fail: 'Не удалось скачать. Попробуйте ещё раз', removed: 'Загрузка удалена', nochap: 'Нет глав', follow: 'Следить за автором', following: 'Вы следите' },
+  zh: { more: '更多', dl: '下载（离线阅读）', dling: (a, n) => '下载中 ' + a + '/' + n, rm: '删除已下载', start: '开始下载…', ok: '已下载，没网也能读', fail: '下载失败，请重试', removed: '已删除下载', nochap: '这本书还没有章节', follow: '关注作者', following: '已关注作者' },
+  en: { more: 'More', dl: 'Download (read offline)', dling: (a, n) => 'Downloading ' + a + '/' + n, rm: 'Remove download', start: 'Download started…', ok: 'Downloaded. You can read offline', fail: 'Download failed. Please try again', removed: 'Download removed', nochap: 'No chapters yet', follow: 'Follow author', following: 'Following author' }
+};
+const MENU_IC = {
+  share: '<path d="M14 5l7 6.5-7 6.5v-4c-5 0-8 1.5-10 5 .5-5.500 4-9.500 10-10.500z"/>',
+  dl: '<path d="M7 18a4.500 4.500 0 01-.600-8.960A6 6 0 0118 10.500 3.800 3.800 0 0117.500 18M12 11v8m0 0l-3-3m3 3l3-3"/>',
+  user: '<circle cx="10" cy="8" r="3.500"/><path d="M3.500 20c.500-3.500 3-5.500 6.500-5.500M18 13v6m-3-3h6"/>',
+  check: '<circle cx="10" cy="8" r="3.500"/><path d="M3.500 20c.500-3.500 3-5.500 6.500-5.500M14.500 17l2.200 2.200 4-4.200"/>'
+};
+const menuIcon = (k) => { const sp = document.createElement('span'); sp.className = 'sheet-ic'; sp.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.700" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + MENU_IC[k] + '</svg>'; return sp; };
+const dlState = new Map(); // bookId -> { done, total }：正在下载的书
+
+function bookMoreBtn(book, chapters) {
+  const tx = MENU_TX[getLang()] || MENU_TX.kk;
+  const btn = h('button', { class: 'btn ghost bk-more', type: 'button', 'aria-label': tx.more });
+  btn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.800"/><circle cx="12" cy="12" r="1.800"/><circle cx="12" cy="19" r="1.800"/></svg>';
+  btn.addEventListener('click', () => openBookMenu(book, chapters));
+  return btn;
+}
+
+async function openBookMenu(book, chapters) {
+  const tx = MENU_TX[getLang()] || MENU_TX.kk;
+  let saved = await offlineHas(book.id);
+  const wrap = h('div', { class: 'sheet-wrap' });
+  const close = () => { wrap.classList.remove('on'); setTimeout(() => wrap.remove(), 220); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+
+  const item = (icon, label, onclick, disabled) => {
+    const b = h('button', { class: 'sheet-item', type: 'button', onclick, disabled: disabled ? '' : null }, menuIcon(icon), h('span', { class: 'sheet-tx' }, label));
+    return b;
+  };
+  const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-label': tx.more }, h('div', { class: 'sheet-handle' }));
+  const paint = () => {
+    sheet.querySelectorAll('.sheet-item').forEach((n) => n.remove());
+    const st = dlState.get(book.id);
+    sheet.append(item('share', (SHARE_TX[getLang()] || SHARE_TX.kk).btn, () => { close(); doShare(book); }));
+    sheet.append(item('dl',
+      st ? tx.dling(st.done, st.total) : (saved ? tx.rm : tx.dl),
+      async () => {
+        if (st) return;
+        if (saved) { await offlineRemove(book.id).catch(() => {}); saved = false; shareToast(tx.removed); close(); return; }
+        if (!chapters.length) { shareToast(tx.nochap); return; }
+        close();
+        shareToast(tx.start);
+        dlState.set(book.id, { done: 0, total: chapters.length });
+        try {
+          await offlineSave(book, chapters, (done, total) => dlState.set(book.id, { done, total }));
+          shareToast(tx.ok);
+        } catch (e) { shareToast(tx.fail); }
+        dlState.delete(book.id);
+      }));
+    if (book.author) {
+      const on = has(readFollows().authors, book.author);
+      sheet.append(item(on ? 'check' : 'user', on ? tx.following : tx.follow, () => {
+        const f = readFollows();
+        if (has(f.authors, book.author)) delete f.authors[book.author]; else f.authors[book.author] = Date.now();
+        writeFollows(f);
+        paint();
+      }));
     }
-  }, tx.btn);
+  };
+  paint();
+  wrap.append(h('div', { class: 'sheet-bg', onclick: close }), sheet);
+  document.body.appendChild(wrap);
+  requestAnimationFrame(() => wrap.classList.add('on'));
 }
 
 function viewBook() {
@@ -1025,3 +1092,7 @@ onRouteChange((r) => { route = r; render(true); });
 onAuth(() => { render(true); goReturn(); initPlayer(); });
 goReturn();
 initPlayer();
+// 离线：注册 service worker（sw.js 放在网站根目录），没网时也能打开应用
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
+}
