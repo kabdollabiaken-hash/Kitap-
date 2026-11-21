@@ -7,6 +7,7 @@ import { storage } from './storage.js';
 import { getBook, getChapterList, langTag, isUuid } from './api.js';
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { h, enc } from './ui.js';
+import { offlineGetChapter } from './offline.js';
 import { createAudio } from './audio.js';
 import { createMarkUI } from './notes.js';
 import { isLoggedIn, login } from './auth.js';
@@ -118,6 +119,13 @@ export function leaveReader() {
 }
 
 async function getChapter(bookId, chapterId) {
+  try { return await getChapterNet(bookId, chapterId); } catch (e) {
+    const off = await offlineGetChapter(chapterId); // 没网：读已下载到本机的章节
+    if (off) return off;
+    throw e;
+  }
+}
+async function getChapterNet(bookId, chapterId) {
   const url = new URL(SUPABASE_URL + '/rest/v1/chapters');
   url.searchParams.set('select', 'id,book_id,chapter_number,title,content,content_sha256,language,script,text_direction,audio_path,audio_seconds');
   url.searchParams.set('id', 'eq.' + chapterId);
