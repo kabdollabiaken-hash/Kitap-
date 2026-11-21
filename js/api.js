@@ -1,5 +1,6 @@
 // 读取在线书籍库（只读，使用公开 key）
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
+import { offlineGetBook } from './offline.js';
 
 const REST = SUPABASE_URL + '/rest/v1/';
 export const PAGE_SIZE = 24;
@@ -115,9 +116,20 @@ export async function listBooks({ q, categorySlug, page = 1, pageSize = PAGE_SIZ
 }
 
 // 单本书详情；不存在或未发布返回 null（null 不缓存）
+// 没网（请求失败）时，用“下载到本机”的版本代替
+function withOffline(fetcher, pick, fixedId) {
+  return async function () {
+    try { return await fetcher(); } catch (e) {
+      const o = fixedId ? await offlineGetBook(fixedId) : null;
+      if (o) return pick(o);
+      throw e;
+    }
+  };
+}
+
 export async function getBook(id) {
   if (!isUuid(id)) return null;
-  return swr('book:' + id, async () => {
+  return swr('book:' + id, withOffline(async () => {
     const rows = await get('books', {
       select: BOOK_FIELDS + ',copyright_note',
       id: 'eq.' + id,
@@ -125,16 +137,16 @@ export async function getBook(id) {
       limit: '1'
     });
     return rows[0] || null;
-  });
+  }, (o) => o.book, id));
 }
 
 // 章节目录：只取编号和标题，不取正文
 export function getChapterList(bookId) {
-  return swr('chapters:' + bookId, () => get('chapters', {
+  return swr('chapters:' + bookId, withOffline(() => get('chapters', {
     select: 'id,chapter_number,title,language,script',
     book_id: 'eq.' + bookId,
     order: 'chapter_number.asc'
-  }));
+  }), (o) => o.chapters, bookId));
 }
 
 // 点书之前先悄悄取好详情和目录（手指一按下就开始）
