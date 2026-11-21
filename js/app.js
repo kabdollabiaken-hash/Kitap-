@@ -767,7 +767,7 @@ function bookDetail(book, chapters, cats) {
       h('span', { class: 'tag' }, bookLabel(book)),
       book.is_ongoing ? h('span', { class: 'tag' }, ongoingText()) : null,
       cat ? h('span', { class: 'tag' }, localized(cat.name)) : null),
-    h('div', { class: 'bk-actions' }, startEl, shelfBtn, listenSlot, status),
+    h('div', { class: 'bk-actions' }, startEl, shelfBtn, shareBtn(book), listenSlot, status),
     resume ? h('div', { class: 'bk-meta' }, t('book.progress', { n: resume.chapter_number, p: Math.round(progress.ratio * 100) })) : null,
     target ? null : h('p', { class: 'bad' }, t('book.nochapters')),
     book.description ? descBlock(book.description, tag) : null);
@@ -816,6 +816,37 @@ function bookDetail(book, chapters, cats) {
     toc,
     seriesSection(book),
     moreSections(book));
+}
+
+// ---------- 分享一本书：系统分享面板，不支持时复制链接 ----------
+const SHARE_TX = {
+  kk: { btn: 'Бөлісу', copied: 'Сілтеме көшірілді', text: (b) => '«' + b.title + '» — ' + b.author + '\nShuhyla қолданбасында оқыңыз' },
+  ru: { btn: 'Поделиться', copied: 'Ссылка скопирована', text: (b) => '«' + b.title + '» — ' + b.author + '\nЧитайте в Shuhyla' },
+  zh: { btn: '分享', copied: '链接已复制', text: (b) => '《' + b.title + '》— ' + b.author + '\n在 Shuhyla 上免费阅读' },
+  en: { btn: 'Share', copied: 'Link copied', text: (b) => '"' + b.title + '" by ' + b.author + '\nRead it on Shuhyla' }
+};
+function shareToast(msg) {
+  let el = document.querySelector('.share-toast');
+  if (el) el.remove();
+  el = h('div', { class: 'share-toast', role: 'status' }, msg);
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('on'));
+  setTimeout(() => { el.classList.remove('on'); setTimeout(() => el.remove(), 300); }, 2200);
+}
+function shareBtn(book) {
+  const tx = SHARE_TX[getLang()] || SHARE_TX.kk;
+  return h('button', {
+    class: 'btn ghost', type: 'button', 'aria-label': tx.btn,
+    onclick: async () => {
+      const url = location.origin + location.pathname + '#/book/' + enc(book.id);
+      const text = tx.text(book);
+      try {
+        if (navigator.share) { await navigator.share({ title: book.title, text, url }); return; }
+      } catch (e) { if (e && e.name === 'AbortError') return; }
+      try { await navigator.clipboard.writeText(text + '\n' + url); shareToast(tx.copied); }
+      catch (e) { window.prompt(tx.btn, url); }
+    }
+  }, tx.btn);
 }
 
 function viewBook() {
