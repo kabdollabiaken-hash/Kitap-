@@ -41,35 +41,67 @@ const PAD_BOTTOM = 26;
 const REST_MS = 30 * 60 * 1000; // 提醒间隔
 const REST_IDLE = 5 * 60 * 1000; // 超过 5 分钟没翻页，连续计时清零
 const REST_SHOW = 4000;
-const REST_TX = {
-  kk: (m) => m + ' минут үздіксіз оқыдыңыз. Көзіңізге демалыс беріңіз',
-  ru: (m) => 'Вы читаете уже ' + m + ' мин. Дайте глазам отдохнуть',
-  zh: (m) => '已连续阅读 ' + m + ' 分钟，让眼睛休息一下吧',
-  en: (m) => "You've been reading for " + m + ' min. Time to rest your eyes'
+const TIME_TX = {
+  kk: { morning: 'Қайырлы таң! Бүгінгі оқу сәтті болсын', noon: 'Қайырлы күн! Тамақтанып алуды ұмытпаңыз', afternoon: 'Күніңіз жақсы өтсін, тамаша кітап оқыңыз', evening: 'Қайырлы кеш! Тыныш кеш оқуға тамаша уақыт', late: 'Түн ауды. Оқып болған соң ертерек демалыңыз', deep: 'Түн ортасы болды. Ұйқыңызға көңіл бөліп, демалыңыз', rest: (m) => m + ' минут үздіксіз оқыдыңыз. Көзіңізге демалыс беріңіз', restNight: (m) => m + ' минут оқыдыңыз, түн болды. Көзіңізге демалыс беріп, ұйықтаңыз' },
+  ru: { morning: 'Доброе утро! Приятного чтения', noon: 'Добрый день! Не забудьте пообедать', afternoon: 'Хорошего дня и хорошей книги', evening: 'Добрый вечер! Самое время для спокойного чтения', late: 'Уже поздно. Дочитайте и ложитесь отдыхать', deep: 'Глубокая ночь. Позаботьтесь о сне и отдохните', rest: (m) => 'Вы читаете уже ' + m + ' мин. Дайте глазам отдохнуть', restNight: (m) => 'Вы читаете ' + m + ' мин, а уже ночь. Отдохните и ложитесь спать' },
+  zh: { morning: '早上好，愿今天读得愉快', noon: '中午好，记得按时吃饭', afternoon: '下午好，祝你读到一本好书', evening: '晚上好，适合安静地读一会儿', late: '夜深了，读完这段就早点休息吧', deep: '已经过了零点，注意睡眠，别熬太晚', rest: (m) => '已连续阅读 ' + m + ' 分钟，让眼睛休息一下吧', restNight: (m) => '已读了 ' + m + ' 分钟，夜很深了，放下书好好睡一觉吧' },
+  en: { morning: 'Good morning! Enjoy your reading', noon: "Good afternoon! Don't forget lunch", afternoon: 'Have a good day and a good book', evening: 'Good evening, a calm time to read', late: "It's getting late. Finish up and get some rest", deep: "It's past midnight. Take care of your sleep", rest: (m) => "You've been reading for " + m + ' min. Time to rest your eyes', restNight: (m) => "You've read for " + m + " min and it's late. Rest and get some sleep" }
 };
-const rest = { start: 0, last: 0, next: 0 };
+const rest = { start: 0, last: 0, next: 0, greetAt: 0, lateKey: '', deepKey: '' };
 if (!document.querySelector('style[data-rd-rest]')) {
   const st = document.createElement('style');
   st.setAttribute('data-rd-rest', '');
   st.textContent = '.rd-rest{position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top,0px));transform:translate(-50%,-8px);max-width:calc(100% - 32px);padding:10px 16px;border-radius:20px;background:rgba(30,36,34,.88);color:#fff;font-size:14px;line-height:1.4;text-align:center;opacity:0;transition:opacity .35s,transform .35s;pointer-events:none;z-index:50}.rd-rest.on{opacity:1;transform:translate(-50%,0)}';
   document.head.appendChild(st);
 }
-function restTick(root) {
-  const n = Date.now();
-  if (!rest.start || n - rest.last > REST_IDLE) { rest.start = n; rest.next = n + REST_MS; }
-  rest.last = n;
-  if (n < rest.next) return;
-  rest.next = n + REST_MS;
-  const mins = Math.round((n - rest.start) / 60000);
+function timeSlot(d) {
+  const h = d.getHours();
+  if (h >= 5 && h < 11) return 'morning';
+  if (h >= 11 && h < 14) return 'noon';
+  if (h >= 14 && h < 18) return 'afternoon';
+  if (h >= 18 && h < 23) return 'evening';
+  if (h === 23) return 'late';
+  return 'deep'; // 0:00–4:59
+}
+function restToast(root, text) {
   const old = root.querySelector('.rd-rest');
   if (old) old.remove();
   const el = document.createElement('div');
   el.className = 'rd-rest';
   el.setAttribute('role', 'status');
-  el.textContent = (REST_TX[getLang()] || REST_TX.kk)(mins);
+  el.textContent = text;
   root.appendChild(el);
   requestAnimationFrame(() => el.classList.add('on'));
   setTimeout(() => { el.classList.remove('on'); setTimeout(() => el.remove(), 400); }, REST_SHOW);
+}
+const txs = () => TIME_TX[getLang()] || TIME_TX.kk;
+// 进入阅读器：按时间段问候（3 小时内不重复）；深夜时段直接给休息提示
+function restGreet(root) {
+  const d = new Date();
+  const n = d.getTime();
+  if (n - rest.greetAt < 3 * 3600 * 1000) return;
+  rest.greetAt = n;
+  const slot = timeSlot(d);
+  const day = d.toDateString();
+  if (slot === 'late') rest.lateKey = day;
+  if (slot === 'deep') rest.deepKey = day;
+  restToast(root, txs()[slot]);
+}
+function restTick(root) {
+  const d = new Date();
+  const n = d.getTime();
+  if (!rest.start || n - rest.last > REST_IDLE) { rest.start = n; rest.next = n + REST_MS; }
+  rest.last = n;
+  const slot = timeSlot(d);
+  const day = d.toDateString();
+  // 读到 23 点、过零点：各提醒一次
+  if (slot === 'late' && rest.lateKey !== day) { rest.lateKey = day; restToast(root, txs().late); return; }
+  if (slot === 'deep' && rest.deepKey !== day) { rest.deepKey = day; restToast(root, txs().deep); return; }
+  if (n < rest.next) return;
+  rest.next = n + REST_MS;
+  const mins = Math.round((n - rest.start) / 60000);
+  const night = slot === 'late' || slot === 'deep';
+  restToast(root, txs()[night ? 'restNight' : 'rest'](mins));
 }
 
 let active = null; // 当前阅读器的清理函数（保存进度、移除监听）
@@ -610,6 +642,7 @@ export function viewReader(params) {
   let marksUI = null;
   const listeners = [];
   const listen = (tg, ev, fn, opt) => { tg.addEventListener(ev, fn, opt); listeners.push([tg, ev, fn, opt]); };
+  setTimeout(() => { if (!disposed) restGreet(root); }, 1500);
 
   active = () => {
     disposed = true;
