@@ -76,3 +76,6 @@ body [lang="zh"] { font-family: 'Noto Serif SC', serif; }
 .brand { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .brand-mk { display: inline-flex; flex: none; color: var(--accent); }
 .brand-mk svg { display: block; }
+
+.share-toast { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 8px); padding: 10px 16px; border-radius: 20px; background: rgba(30,36,34,.9); color: #fff; font-size: 14px; opacity: 0; transition: opacity .3s, transform .3s; pointer-events: none; z-index: 60; }
+.share-toast.on { opacity: 1; transform: translate(-50%, 0); }
